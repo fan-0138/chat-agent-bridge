@@ -204,6 +204,9 @@ nohup ./scripts/net-watch.sh >> logs/net-watch.log 2>&1 &
 ./scripts/install-launchd.sh --uninstall  # 还原成手动
 ```
 
+> 这套开关**只管 QQ 通道**。微信通道没有守护进程，`npm run start:wechat` 起在前台就行
+> （要后台：`nohup npm run start:wechat >> logs/bridge.log 2>&1 &`）。
+
 > ⚠️ **停要用 `stop`，别用 `kill`**：launchd 托管下 `kill` 掉的进程 30 秒后会被自动拉回来。
 
 ### macOS 的坑：TCC 不让后台任务读 `~/Documents`
