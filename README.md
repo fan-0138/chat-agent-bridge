@@ -6,6 +6,10 @@
 她有人设、有长期记忆、有作息和情绪、会自己找话题、会发语音和表情包、能帮你动手干活，
 三个平台上还是**同一条鱼**。
 
+**而且她不需要你一直开着 DSH。** DSH 只是你调教她、写代码的地方——桥接是独立的后台进程，
+关掉 DSH 窗口、关掉终端、断掉 SSH，她照样在 QQ / 微信里收发消息；
+跑一次 `./scripts/install-launchd.sh`，连重启电脑都会自己上线（见[常驻与开机自启](#常驻与开机自启不用一直开着-dsh)）。
+
 > 🍎 **为什么是 Mac 专用**：市面上 QQ 机器人方案几乎全在 Windows / Linux（NapCat 那套）。
 > macOS 上 NapCat 装不起来（我们实测踩过，见 [docs](docs/QQ接入手册.md)），
 > 所以这里走的是 Docker 里的 OneBot 端 + 原生 macOS 桥接，做的人很少。
@@ -47,6 +51,8 @@
 - **语音**：文字 → Edge TTS → SILK → 真正的 QQ 语音条（自己决定什么时候说）
 - **表情包**：丢进 `data/stickers/` 就会用
 - **定时提醒**：独立守护进程，到点私聊喊你，失败重试 30 分钟
+- **不靠 DSH 活着**：桥接跟 DSH 是两个进程，关掉 DSH / 关掉终端她照样在聊（DSH 要装着，但不用开着）
+- **开机自启 + 崩溃自愈**：`./scripts/install-launchd.sh` 交给 launchd，重启电脑自动上线，崩了半分钟自己回来
 - **网络看门狗**：换 WiFi 后 QQ 客户端会「能发不能收」，它负责发现并自动恢复
 - **关掉前告别**：正常退出会先说一句；被硬杀下次启动会补一句
 - **饭饭账本**：到点记账，月初把上个月的翻给你
@@ -172,6 +178,51 @@ nohup ./scripts/supervise-remind.sh >> logs/qq-remind.log 2>&1 &   # 常驻
 nohup ./scripts/net-watch.sh >> logs/net-watch.log 2>&1 &
 ```
 
+## 常驻与开机自启（不用一直开着 DSH）
+
+**她不需要你一直开着 DSH。** DSH 只是你调教她、写代码的地方；桥接是独立的 node 进程，
+关掉 DSH 窗口、关掉终端、断掉 SSH，她都在后台照常收发消息。
+
+> 唯一的耦合：她回一条消息时会临时拉起一个 `dsh` CLI 去处理，所以 DSH 要**装着**，但不用**开着**。
+> 用纯聊天模式（`AGENT_BACKEND=openai`）的话，连这个都不需要。
+
+两种跑法，`scripts/qqbridge-ctl.sh` 会自动挑：
+
+| 跑法 | 父进程 | 关掉 DSH / 终端 | 电脑重启后 | 前置条件 |
+|---|---|---|---|---|
+| **脱钩方式**（默认） | 启动它的 shell，随后交给 launchd | 不受影响 | 手动启动一次 | 无 |
+| **launchd 托管** | launchd | 不受影响 | **自动上线** | 见下面的 macOS 限制 |
+
+```bash
+./scripts/qqbridge-ctl.sh start       # 启动桥接 + 定时提醒 + 网络看门狗
+./scripts/qqbridge-ctl.sh status      # 看状态（会显示父进程是不是 launchd）
+./scripts/qqbridge-ctl.sh stop        # 停止（整组发 TERM，她会在 QQ 上道别）
+./scripts/qqbridge-ctl.sh stop-all    # 三个一起停
+./scripts/qqbridge-ctl.sh restart     # 重启（改完配置/掉线时用）
+
+./scripts/install-launchd.sh              # 装成开机自启（桥接 + 提醒 + 看门狗 + 防休眠）
+./scripts/install-launchd.sh --uninstall  # 还原成手动
+```
+
+> ⚠️ **停要用 `stop`，别用 `kill`**：launchd 托管下 `kill` 掉的进程 30 秒后会被自动拉回来。
+
+### macOS 的坑：TCC 不让后台任务读 `~/Documents`
+
+`install-launchd.sh` 装完大概率起不来——`launchctl` 报退出码 `78`，连日志都写不出来。
+不是脚本的问题，是 macOS 的隐私保护（TCC）：launchd 起的后台任务读不了 `~/Documents`、桌面、下载，
+`cron` 也一样。两条路：
+
+1. **授一次权（一次点击）**：系统设置 → 隐私与安全性 → **完全磁盘访问权限** → `+` → `⌘⇧G` 输入 `/bin/sh`
+   → 打开开关。整棵进程树都继承，node / python / ffmpeg 都不用单独授。
+2. **别把项目放在 `~/Documents`（推荐，不用动任何权限）**：放 `~` 下面，旧路径留个软链，命令和路径都不用改——
+
+   ```bash
+   mv ~/Documents/chat-agent-bridge ~/chat-agent-bridge
+   ln -s ~/chat-agent-bridge ~/Documents/chat-agent-bridge
+   ```
+
+安装脚本会先自测，通不过会直接停下来告诉你走哪条，不会装一个每 30 秒失败一次的空气任务。
+
 ## 目录结构
 
 ```
@@ -187,7 +238,7 @@ src/
   meals.js           饭饭账本
   runner-factory.js  选模型后端：dsh / openai
   ...
-scripts/             运维与一次性工具：提醒、语音、表情包、抖音、看门狗
+scripts/             常驻开关、launchd 安装、提醒、语音、表情包、抖音、看门狗
 docs/                踩坑记录、平台接入手册、性格刻度说明
 test/                213 个单测
 ```
@@ -203,6 +254,8 @@ test/                213 个单测
 | `npm run say -- "话"` | 合成一条语音试听 |
 | `npm run meal -- --list` | 看饭饭账本 |
 | `npm run remind -- --at "08:30" --text "起床"` | 加一条提醒 |
+| `./scripts/qqbridge-ctl.sh status` | 看桥接 / 提醒 / 看门狗在不在跑 |
+| `./scripts/install-launchd.sh` | 装成开机自启（详见「常驻与开机自启」） |
 
 ## 已知边界
 
@@ -210,6 +263,8 @@ test/                213 个单测
 - **微信只能 1:1 私聊**，不能进群（iLink 通道限制）；主动发消息有 24 小时窗口
 - **抖音走网页版**：图片/语音/卡片这类消息网页渲染不出来，只能让她请对方打字
 - **QQ 客户端换网络会「能发不能收」**，靠 `net-watch.sh` 兜
+- **合盖还是会睡**：`caffeinate` 只挡空闲休眠，挡不住合盖；要合盖也在线得接电源 + 外接显示器
+- **容器重启后可能要扫码**：SnowLuma 重启后若没自动登录，需要再扫一次码（QQ 协议那边的事，桥接管不了）
 - 所有通道都是非官方接口，**有风控风险**，请用小号
 
 ## 开发

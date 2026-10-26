@@ -93,17 +93,10 @@ while :; do
   notify "收不到消息了，正在重启 QQ 客户端"
 
   # 1) 停桥接，别让它对着没登录的网关狂重连
-  if [ -f logs/qq-bridge.pid ]; then
-    old=$(cat logs/qq-bridge.pid)
-    kill -TERM -- "-$old" 2>/dev/null || kill -TERM "$old" 2>/dev/null
-    sleep 1
-    kill -9 -- "-$old" 2>/dev/null
-    # 进程组可能没建成，兜底按命令行杀干净，别留个孤儿在那儿狂重连
-    pkill -f "src/index-qq.js" 2>/dev/null
-    pkill -f "scripts/supervise-qq.sh" 2>/dev/null
-    rm -f logs/qq-bridge.pid logs/qq-caffeinate.pid
-    log "已停桥接 pid=$old"
-  fi
+  #    必须走 ctl：launchd 托管时得 bootout 才压得住（直接 kill 会被 KeepAlive 立刻拉回来，
+  #    那就变成对着没登录的网关狂重连、把重试次数烧光）
+  ./scripts/qqbridge-ctl.sh stop >/dev/null 2>&1
+  log "已停桥接（接着重启 QQ 客户端）"
 
   # 2) 重启 QQ 客户端
   docker restart "$CONTAINER" >/dev/null 2>&1 && log "容器已重启" || log "容器重启失败"
@@ -137,13 +130,7 @@ while :; do
   fi
 
   log "QQ 已登录，拉起桥接"
-  nohup ./scripts/supervise-qq.sh >> logs/qq-bridge.log 2>&1 &
-  newpid=$!
-  echo "$newpid" > logs/qq-bridge.pid
-  if command -v caffeinate >/dev/null 2>&1; then
-    nohup caffeinate -i -m -s -w "$newpid" >/dev/null 2>&1 &
-    echo $! > logs/qq-caffeinate.pid
-  fi
+  ./scripts/qqbridge-ctl.sh start >>logs/qq-bridge.log 2>&1
   sleep 12
   if tail -30 logs/qq-bridge.log | grep -q "已连上网关"; then
     log "恢复完成：桥接已连上网关"
