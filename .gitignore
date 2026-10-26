@@ -1,0 +1,22 @@
+# 依赖
+node_modules/
+.venv-tts/
+
+# 配置（真值绝不入库）
+.env
+.env.qq
+.env.*
+!.env.example
+!.env.qq.example
+
+# 她自己的东西：人设、记忆、聊天记录、日志、表情包、语音
+persona.md
+persona.traits.json
+data/
+logs/
+*.log
+*.pid
+
+# 系统
+.DS_Store
+*.swp

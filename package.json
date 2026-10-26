@@ -1,0 +1,52 @@
+{
+  "name": "chat-agent-bridge",
+  "version": "0.1.0",
+  "description": "把一个 LLM Agent 接进 QQ / 微信 / 抖音：人设、长期记忆、生活状态、语音、表情包、提醒，跨平台同一个「她」（macOS 优先）",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/your-name/chat-agent-bridge",
+  "keywords": [
+    "qq-bot",
+    "onebot",
+    "wechat",
+    "douyin",
+    "llm",
+    "agent",
+    "macos",
+    "dsh"
+  ],
+  "scripts": {
+    "start:qq": "node --env-file-if-exists=.env.qq src/index-qq.js",
+    "start:wechat": "node --env-file-if-exists=.env src/index.js",
+    "selfcheck:qq": "node --env-file-if-exists=.env.qq src/index-qq.js --check",
+    "probe:qq": "node --env-file-if-exists=.env.qq src/index-qq.js --probe",
+    "simulate:qq": "node --env-file-if-exists=.env.qq scripts/simulate-qq.js",
+    "say": "node --env-file-if-exists=.env.qq scripts/say.mjs",
+    "meal": "node scripts/meal.mjs",
+    "remind": "node scripts/qq-remind.mjs",
+    "persona": "node scripts/persona-preview.mjs",
+    "voice:preview": "node --env-file-if-exists=.env.qq scripts/voice-preview.mjs",
+    "test": "node --test",
+    "check": "node --check src/bridge.js && node --check src/classify.js && node --check src/config-qq.js && node --check src/config.js && node --check src/credentials.js && node --check src/decor.js && node --check src/douyin-channel.js && node --check src/douyin-score.js && node --check src/douyin-side.js && node --check src/dsh.js && node --check src/index-qq.js && node --check src/index.js && node --check src/life.js && node --check src/log.js && node --check src/meals.js && node --check src/memory.js && node --check src/openai-runner.js && node --check src/persona.js && node --check src/proactive.js && node --check src/prompt.js && node --check src/queue.js && node --check src/runner-factory.js && node --check src/slang.js && node --check src/split.js && node --check src/stickers.js && node --check src/thinking-guard.js && node --check src/traits.js && node --check src/transport-ilink.js && node --check src/transport-onebot.js && node --check src/vision.js && node --check src/voice-audit.js && node --check src/voice-out.js && node --check src/voice.js && node --check scripts/douyin-act.mjs && node --check scripts/douyin-comment.mjs && node --check scripts/douyin-feed.mjs && node --check scripts/douyin-hot.mjs && node --check scripts/douyin-login.mjs && node --check scripts/douyin-notice.mjs && node --check scripts/douyin-say.mjs && node --check scripts/meal.mjs && node --check scripts/note-meme.mjs && node --check scripts/patch-longterm-memory.mjs && node --check scripts/persona-preview.mjs && node --check scripts/qq-action.mjs && node --check scripts/qq-remind.mjs && node --check scripts/say.mjs && node --check scripts/send-sticker.mjs && node --check scripts/sticker-add.mjs && node --check scripts/surf.mjs && node --check scripts/voice-preview.mjs && node --check scripts/voice.mjs",
+    "douyin:login": "node scripts/douyin-login.mjs",
+    "douyin:feed": "node scripts/douyin-feed.mjs",
+    "douyin:hot": "node scripts/douyin-hot.mjs",
+    "douyin:comment": "node scripts/douyin-comment.mjs",
+    "sticker:add": "node scripts/sticker-add.mjs",
+    "voice": "node scripts/voice.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "silk-wasm": "^3.7.1",
+    "wechat-ilink-client": "0.1.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1"
+  }
+}

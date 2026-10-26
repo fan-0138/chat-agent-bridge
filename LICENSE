@@ -1,0 +1,42 @@
+MIT License（附加「仅限个人非商业使用」条款）
+
+Copyright (c) 2026 chat-agent-bridge contributors
+
+────────────────────────────────────────────
+第一条：使用范围（附加条款，优先于下面 MIT 正文）
+
+1. 本软件仅限**个人、非商业**用途：自己跟自己的 AI 聊天、自己研究学习。
+2. **禁止任何形式的商业使用与售卖**，包括但不限于：
+   - 打包售卖、订阅收费、按次收费、增值服务；
+   - 部署成对公众开放的服务（网站、App、小程序、API、代挂）；
+   - 用于企业客服、营销、引流、批量账号运营；
+   - 把本软件或其衍生作品作为商品的一部分交付给客户。
+3. 违反第 1、2 条的，作者保留追究法律责任的权利（包括但不限于停止侵权、
+   赔偿损失、公开声明等）。
+4. 使用者自行承担一切由使用本软件产生的后果，详见 DISCLAIMER.md。
+5. 转载、分发时必须保留本 LICENSE、DISCLAIMER.md 与作者署名，且不得移除上述限制。
+
+────────────────────────────────────────────
+下面是 MIT 正文，在不与本附加条款冲突的前提下适用：
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+────────────────────────────────────────────
+说明：因为有「禁止商用」这条，本项目**不是** OSI 定义的开源软件，属于
+source-available（源码可见、非商业授权）。介意这一点的人请勿使用。

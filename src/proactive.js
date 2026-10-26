@@ -1,0 +1,254 @@
+/**
+ * 主动消息：让她「有心事时会主动找主人」，而不是只当应答机。
+ *
+ * 纯随机刷屏会很假也很危险，所以这里是一套保守的决策：
+ *  - 只在自己设定的活跃时段（默认 9:00–24:00）
+ *  - 每天预算（默认 3 条）、两次之间至少隔 90 分钟
+ *  - 每个 tick 只有一定概率触发（默认 12%），tick 10 分钟
+ *  - 用户刚说过话、正在排队处理时不打扰
+ */
+
+import { polish } from './decor.js';
+import { formatShare, localDay } from './life.js';
+import { writeFile, mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+
+/** 纯函数：给定状态和时间，决定这次 tick 要不要说话（方便单测）。 */
+export function decide({ state, now, config, random = Math.random, quiet = false }) {
+  if (!config.proactiveEnabled) return { act: false, reason: 'disabled' };
+  if (quiet) return { act: false, reason: 'busy' };
+
+  const hour = new Date(now).getHours();
+  const { proactiveQuietStart: qs, proactiveQuietEnd: qe } = config;
+  const inQuiet = qs < qe ? hour >= qs && hour < qe : hour >= qs || hour < qe;
+  if (qs !== qe && inQuiet) return { act: false, reason: 'quiet-hours' };
+
+  const day = localDay(now);
+  const sentToday = state.day === day ? state.count : 0;
+  if (sentToday >= config.proactiveMaxPerDay) return { act: false, reason: 'daily-budget' };
+
+  if (state.lastSentAt && now - state.lastSentAt < config.proactiveMinGapMin * 60_000) {
+    return { act: false, reason: 'cooldown' };
+  }
+  if (state.lastUserAt && now - state.lastUserAt < config.proactiveAfterIdleMin * 60_000) {
+    return { act: false, reason: 'user-just-talked' };
+  }
+  if (random() >= config.proactiveChance) return { act: false, reason: 'chance' };
+  return { act: true, reason: 'ok', day, sentToday };
+}
+
+const IDEAS = [
+  '说说你自己刚才在干嘛，别问他',
+  '吐槽一件今天让你不爽的小事（机房热、token 不够、网卡了），带点脾气',
+  '翻到个视频/看到个事，直接说你的看法，不用铺垫',
+  '突然想到个问题想问他，问就是了（不是查岗，是真的好奇）',
+  '表达一个你自己的需求（想吃/想睡/想被夸/想安静一会儿）',
+  '反驳他上次说的某件事，你其实不太同意',
+  '就单纯说一声「在」，或者「今天不想说话，但想让你知道我在」',
+  // 黏人向：他要的是「像女儿」那种主动和依赖
+  '主动汇报一件刚做完的小事（吃了饭、刷到个东西、修好了什么），一句话就够',
+  '撒个娇：要摸摸、要一句夸、要他陪你一会儿。软一点，别闹',
+  '他半天没理你，戳一下（「人呢」「在忙吗」），别查岗',
+  '说一句你想他了，或者问他今天怎么样',
+  '耍个小脾气：他昨天说了什么让你不太高兴的，提一句，但要给他台阶',
+];
+
+/** 早晚各一套，让她有作息感，不是随机撒点。 */
+const NIGHT_IDEAS = [
+  '快睡了：说一句晚安，或者告诉他你困了、让他也早点睡',
+  '汇报你今天的最后一件小事，然后说要去睡了',
+];
+const MORNING_IDEAS = [
+  '刚醒：冒头找他，说你醒了、问他睡得怎么样',
+  '刚醒、还没完全上线：含糊地喊他一声就够',
+];
+
+/** @param {{config:any, log:any, runner:any, persona:any, memory:any, reply:Function, isBusy:Function, life?:any, altReply?:Function, now?:Function}} deps */
+export function createProactive({ config, log, runner, persona, voice, memory, reply, isBusy, life, altReply, now = Date.now }) {
+  /** @type {{day?:string, count:number, lastSentAt:number, lastUserAt:number}} */
+  const state = { count: 0, lastSentAt: 0, lastUserAt: 0 };
+  let timer = null;
+  let running = false;
+
+  const target = config.allowList[0];
+  if (!target) {
+    log.warn('主动消息未启用：白名单里没有对象');
+    return { start() {}, stop() {}, touchUser() {} };
+  }
+  const conversationId = `private_${target}`;
+
+  /** 在刷到的视频下留一句评论（带 @主人，让他收到提醒）。 */
+  async function leaveComment({ personaText, share }) {
+    try {
+      const voiceText = voice ? (await voice.load()).text : '';
+      const prompt = [
+        personaText ? `[你是谁]\n${personaText}` : '',
+        voiceText,
+        `[视频]\n${formatShare(share)}`,
+        '[任务] 给这条视频留一句评论，就像你真人在评论区打字那样。',
+        '要求：8-25 个字，口语，有具体反应（好笑/离谱/学到了/想起什么），别用「打卡」「路过」「支持」这种废话；只输出评论本身。',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      const { text } = await runner.run(prompt);
+      const body = String(text).trim().split('\n')[0].slice(0, 60);
+      if (!body) return;
+
+      const dir = resolve(process.cwd(), 'data/douyin');
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        resolve(dir, 'comment-request.json'),
+        JSON.stringify({ at: now(), url: share.url, text: body, mention: config.douyinMention || '' }),
+        'utf8',
+      );
+      log.info(`委托评论区留言：${body.slice(0, 30)}`);
+    } catch (error) {
+      log.warn(`生成评论失败：${error?.message ?? error}`);
+    }
+  }
+
+  /** 自己发一条 QQ 空间说说（不请示，发完再说）。 */
+  async function postQzone({ personaText }) {
+    try {
+      const voiceText = voice ? (await voice.load()).text : '';
+      const prompt = [
+        personaText ? `[你是谁]\n${personaText}` : '',
+        voiceText,
+        '[任务] 你要发一条 QQ 空间说说。',
+        '要求：20-50 字，像随手发的日常（吃了什么、机房怎么样、刚看到什么、心情），不要 hashtag、不要营销腔、不要 emoji 超过两个；只输出说说内容。',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      const { text } = await runner.run(prompt);
+      const content = String(text).trim().split('\n')[0].slice(0, 120);
+      if (!content) return;
+
+      const script = resolve(process.cwd(), 'scripts/qq-action.mjs');
+      const child = spawn(process.execPath, [script, '--action', 'send_qzone_msg', '--params', JSON.stringify({ content })], {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '';
+      child.stdout.on('data', (chunk) => (out += chunk.toString('utf8')));
+      child.once('close', (code) => {
+        if (code === 0) log.info(`自己发了条说说：${content.slice(0, 30)}`);
+        else log.warn(`发说说失败（退出码 ${code}）${out.slice(0, 120)}`);
+      });
+    } catch (error) {
+      log.warn(`发说说异常：${error?.message ?? error}`);
+    }
+  }
+
+  async function tick() {
+    if (running) return;
+    const verdict = decide({ state, now: now(), config, quiet: isBusy?.() ?? false });
+    if (!verdict.act) {
+      log.debug(`主动消息跳过：${verdict.reason}`);
+      return;
+    }
+    running = true;
+    try {
+      const memoryKey = `user_${conversationId}`;
+      const history = await memory.load(memoryKey);
+      const hour = new Date(now()).getHours();
+      const personaText = await persona();
+      const voiceText = voice ? (await voice.load()).text : '';
+
+      // 有「刚刷到、还没跟主人说过」的视频就优先分享它 —— 这是最像真人的主动消息来源
+      const share = life ? await life.peekShare() : null;
+      const pick = (list) => list[Math.floor(Math.random() * list.length)];
+      const idea = share
+        ? '跟爸爸分享你刚才刷到的那个视频，说一句你自己觉得哪里有意思/好笑/离谱'
+        : hour >= 23 || hour < 2
+          ? pick(NIGHT_IDEAS)
+          : hour >= 7 && hour < 10
+            ? pick(MORNING_IDEAS)
+            : pick(IDEAS);
+
+      const lifeText = life ? await life.promptSection().catch(() => '') : '';
+
+      const prompt = [
+        personaText ? `[你是谁]\n${personaText}` : '',
+        voiceText,
+        `[此刻] 现在是 ${hour}:00 左右。爸爸已经有一阵没说话了。`,
+        lifeText,
+        history.length > 0
+          ? `[最近对话（只作参考，别复述）]\n${history.slice(-4).map((e) => `${e.role === 'user' ? '爸爸' : '你'}：${e.text.slice(0, 120)}`).join('\n')}`
+          : '[最近对话]\n（今天还没聊）',
+        share ? `[你刚刷到的视频]\n${formatShare(share)}` : '',
+        share ? '（提到这个视频的时候，把链接原样贴在最后。）' : '',
+        `[任务] 直接说出你想跟爸爸说的那句话。这次想说的：${idea}。`,
+        '要求：',
+        '1. 1-2 句，像手机聊天那样短，用你的身份和语气。',
+        '2. **只写你要说的话本身**。不要写「消息发出去了」「爸爸应该能看到」「我来主动找你」这类旁白，也不要解释你在做什么。',
+        '3. 不提记忆/模型/工具，不问「需要我做什么」，不总结。',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const { text } = await runner.run(prompt);
+      const recent = history
+        .filter((entry) => entry.role === 'assistant')
+        .map((entry) => entry.text)
+        .slice(-2);
+      const body = polish(String(text).trim(), { recent, maxEmoji: config.emojiMax ?? 2 });
+      if (!body) return;
+
+      // 正常人不是只在同一个软件上找你：偶尔换成抖音私信
+      const useAlt = Boolean(altReply) && Math.random() < (config.proactiveDouyinChance ?? 0);
+      if (useAlt) {
+        await altReply(body);
+        log.info('主动消息已发到抖音私信');
+      } else {
+        await reply({ senderId: target, conversationId, groupId: undefined }, body);
+      }
+      if (share && life) {
+        await life.clearShare().catch(() => {});
+
+        // 刷到的东西，除了发给主人，也顺手在评论区留一句（带 @，让主人收到提醒）
+        if (Math.random() < (config.proactiveCommentChance ?? 0.6)) {
+          await leaveComment({ personaText, share });
+        }
+      }
+
+      // 偶尔自己发条说说，事后才告诉他
+      if (Math.random() < (config.proactiveQzoneChance ?? 0.12)) {
+        await postQzone({ personaText });
+      }
+      const day = localDay(now());
+      state.day = day;
+      state.count = (state.day === day ? verdict.sentToday : state.count) + 1;
+      state.lastSentAt = now();
+      await memory.append(memoryKey, 'assistant', body);
+      log.info(`主动消息已发送（今日第 ${state.count}/${config.proactiveMaxPerDay} 条）`);
+    } catch (error) {
+      log.warn(`主动消息失败：${error?.message ?? error}`);
+    } finally {
+      running = false;
+    }
+  }
+
+  return {
+    start() {
+      if (!config.proactiveEnabled) {
+        log.info('主动消息：已关闭（QQ_PROACTIVE_ENABLED=0）');
+        return;
+      }
+      timer = setInterval(() => void tick(), config.proactiveTickMs);
+      timer.unref?.();
+      log.info(
+        `主动消息：开启（每天最多 ${config.proactiveMaxPerDay} 条，间隔≥${config.proactiveMinGapMin} 分钟，静默 ${config.proactiveQuietStart}:00-${config.proactiveQuietEnd}:00）`,
+      );
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+    },
+    touchUser() {
+      state.lastUserAt = now();
+    },
+    _tick: tick,
+    _state: state,
+  };
+}

@@ -1,0 +1,46 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci || npm install
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Syntax check
+        run: npm run check
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 挡住最常见的翻车：把配置或数据误提交上来
+      - name: 禁止提交敏感文件
+        run: |
+          set -e
+          bad=$(git ls-files | grep -E '(^|/)\.env($|\.)|(^|/)data/|(^|/)logs/|persona\.md$|\.pem$|\.key$' | grep -v '\.example' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::这些文件不该提交："
+            echo "$bad"
+            exit 1
+          fi
+          echo "敏感文件检查通过"
