@@ -50,7 +50,9 @@ export function createPersona({ file, traitsFile = file.replace(/\.md$/i, '.trai
     if (!body) {
       // 人设文件都没有，就别只扔一堆刻度进去
       cache = { text: '', key };
-      if (cache.text) log?.info('人设文件不存在，本次不使用人设');
+      log?.warn(
+        `没有找到人设文件 ${file}：先 cp persona.example.md persona.md，再照自己的喜好改（改完不用重启）`,
+      );
       return '';
     }
 
