@@ -23,6 +23,9 @@ import { rank as rankCandidates } from '../src/douyin-score.js';
 
 const CACHE_FILE = resolve(STATE_DIR, 'seen.jsonl');
 const LATEST_FILE = resolve(STATE_DIR, 'latest.json');
+// 「已经给她看过的视频」：同一批内容别反复喂给她，否则她会把同一个视频反复讲给主人听
+const TOLD_FILE = resolve(STATE_DIR, 'told.json');
+const TOLD_HOURS = Number(process.env.DOUYIN_TOLD_HOURS || 24);
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
@@ -40,6 +43,7 @@ const COMMENTS = Number(option('--comments', 0));
 // 点赞：在同一次会话里点掉，避免再开一次浏览器
 const LIKE = Number(option('--like', 0));
 const SKIP_IDS = new Set(String(option('--skip', '')).split(',').filter(Boolean));
+const SHOW_ALL = flag('--all');
 
 /* ────────────────────────── 缓存读写 ────────────────────────── */
 
@@ -70,6 +74,37 @@ async function appendCache(items) {
     const keep = all.slice(-1_500).map((item) => JSON.stringify(item)).join('\n');
     await writeFile(CACHE_FILE, `${keep}\n`, 'utf8');
   }
+}
+
+/** 已经给她看过的视频（id -> 时间戳），超过 TOLD_HOURS 自动过期。 */
+async function loadTold() {
+  try {
+    const data = JSON.parse(await readFile(TOLD_FILE, 'utf8'));
+    return data && typeof data.ids === 'object' ? data.ids : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveTold(ids) {
+  const cutoff = Date.now() - TOLD_HOURS * 3_600_000;
+  const kept = Object.entries(ids)
+    .filter(([, ts]) => Number(ts) > cutoff)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 300);
+  ensureDirs();
+  await writeFile(TOLD_FILE, `${JSON.stringify({ ids: Object.fromEntries(kept) }, null, 2)}\n`, 'utf8');
+}
+
+/** 过滤掉最近给她看过的；剩下的标记为看过，避免下一轮又端上来。 */
+async function filterAndMark(items) {
+  if (SHOW_ALL) return { items, hidden: 0 };
+  const ids = await loadTold();
+  const now = Date.now();
+  const kept = items.filter((item) => !(item.id && ids[item.id]));
+  for (const item of kept) if (item.id) ids[item.id] = now;
+  await saveTold(ids).catch(() => {});
+  return { items: kept, hidden: items.length - kept.length };
 }
 
 /** 最近 N 条不重复的视频（新的在前）。 */
@@ -344,13 +379,13 @@ async function grabComments(page, awemeId) {
 
 /* ────────────────────────── 输出 ────────────────────────── */
 
-function printHuman(items, { loggedIn } = {}) {
+function printHuman(items, { loggedIn, hidden = 0 } = {}) {
   if (items.length === 0) {
     console.log('什么也没刷到（可能是没登录、被风控、或者页面结构变了）。');
     return;
   }
   const when = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-  console.log(`刷到 ${items.length} 条（${when}）${loggedIn === false ? ' [游客模式]' : ''}`);
+  console.log(`刷到 ${items.length} 条（${when}）${loggedIn === false ? ' [游客模式]' : ''}${hidden > 0 ? `（另有 ${hidden} 条之前看过，已隐藏）` : ''}`);
   items.forEach((item, index) => {
     const meter = item.likes >= 10_000 ? `${(item.likes / 10_000).toFixed(1)}万赞` : `${item.likes}赞`;
     const flags = [item.isAd ? '广告' : '', item.isLive ? '直播' : ''].filter(Boolean).join('/');
@@ -373,24 +408,31 @@ async function main() {
 
   if (CACHED) {
     const entries = await readCache();
-    const items = latestUnique(entries, LIMIT);
-    if (items.length === 0) {
+    const picked = latestUnique(entries, LIMIT);
+    if (picked.length === 0) {
       console.log('缓存是空的。先跑一次 node scripts/douyin-feed.mjs 真刷一遍。');
       process.exit(2);
     }
+    const { items, hidden } = await filterAndMark(picked);
+    if (items.length === 0) {
+      if (AS_JSON) console.log(JSON.stringify([]));
+      else console.log(`最近 ${TOLD_HOURS} 小时刷到的这几条都已经看过/说过了，换个时间再刷。（要全都看加 --all）`);
+      return;
+    }
     if (AS_JSON) console.log(JSON.stringify(items, null, 2));
-    else printHuman(items, { loggedIn: true });
+    else printHuman(items, { loggedIn: true, hidden });
     return;
   }
 
   const { items, loggedIn, liked } = await browse();
+  const { items: fresh, hidden } = await filterAndMark(items);
 
   if (AS_JSON) {
-    console.log(JSON.stringify({ loggedIn, count: items.length, items, liked }, null, 2));
+    console.log(JSON.stringify({ loggedIn, count: fresh.length, hidden, items: fresh, liked }, null, 2));
   } else {
-    printHuman(items, { loggedIn });
+    printHuman(fresh, { loggedIn, hidden });
   }
-  if (items.length === 0) process.exit(2);
+  if (fresh.length === 0) process.exit(2);
 }
 
 main().catch((error) => {

@@ -453,6 +453,7 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
         parts.push(
           `[你刚刷到的视频]\n${formatShare(share.item)}\n` +
             '（这是你自己刚刷到的。主人问到你在干嘛、或者话题挨得上，可以自然提一嘴；' +
+            '**同一个视频只说一次**，说过的别再提；' +
             '完全不相关就别硬塞。）',
         );
       }
