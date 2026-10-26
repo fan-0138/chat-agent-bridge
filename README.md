@@ -90,7 +90,7 @@ docker run -d --name snowluma \
 ### 2. 配桥接
 
 ```bash
-git clone <this-repo> chat-agent-bridge && cd chat-agent-bridge
+git clone https://github.com/fan-0138/chat-agent-bridge.git chat-agent-bridge && cd chat-agent-bridge
 npm install
 cp .env.qq.example .env.qq
 cp persona.example.md persona.md            # 她是谁，自己改
