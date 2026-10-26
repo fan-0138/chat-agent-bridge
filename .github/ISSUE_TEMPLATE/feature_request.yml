@@ -1,0 +1,55 @@
+name: "✨ 功能建议"
+description: 想要新能力、新平台、新玩法
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前先看一眼 [LICENSE](https://github.com/fan-0138/chat-agent-bridge/blob/main/LICENSE)：
+        **仅限个人自用，禁止商用、批量、对外服务** 的功能不会做。
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 类型
+      options:
+        - 新平台适配（Telegram / Discord / 飞书…）
+        - 新模型后端
+        - 拟人化（说话、记忆、生活状态、语音…）
+        - 运维工具（守护、备份、诊断）
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 想要什么
+      description: 一句话说清，再补几句细节
+      placeholder: "希望她能把语音消息也听成文字，现在收到语音只会让我打字"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么想要
+      description: 现在哪个场景不方便？没有这个能力时你是怎么绕过去的？
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你心里的实现思路（可选）
+      description: 有想法就写，没有也行
+      render: markdown
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 这个功能是个人自用场景，不涉及批量、商用、绕过风控
+          required: true
