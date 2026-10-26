@@ -1,7 +1,7 @@
 {
   "name": "chat-agent-bridge",
   "version": "0.1.0",
-  "description": "macOS 上的个人 AI 桥接：把 LLM Agent 接进 QQ / 微信 / 抖音，人设、长期记忆、语音、表情包、定时提醒，跨平台同一个她",
+  "description": "macOS 上的虚拟伴侣框架：用 DeepSeek 等大模型造一个住在 QQ / 微信 / 抖音里的 AI 女儿或赛博女友——人设、长期记忆、语音、表情包、定时提醒",
   "type": "module",
   "private": false,
   "engines": {
@@ -10,15 +10,21 @@
   "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://github.com/fan-0138/chat-agent-bridge",
   "keywords": [
-    "macos",
-    "qq-bot",
-    "onebot",
-    "wechat",
-    "douyin",
-    "llm",
     "agent",
     "ai-companion",
-    "snowluma"
+    "ai-daughter",
+    "ai-girlfriend",
+    "chatbot",
+    "deepseek",
+    "douyin",
+    "llm",
+    "macos",
+    "onebot",
+    "qq-bot",
+    "roleplay",
+    "snowluma",
+    "virtual-companion",
+    "wechat"
   ],
   "scripts": {
     "start:qq": "node --env-file-if-exists=.env.qq src/index-qq.js",
