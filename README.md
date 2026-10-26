@@ -1,9 +1,15 @@
 # chat-agent-bridge
 
-把一个**大模型 Agent** 接进你自己的 QQ / 微信 / 抖音，养一个「住在你电脑里」的数字人格。
+**专为 macOS 打造**的个人 AI 桥接：把一个**大模型 Agent** 接进你自己的 QQ / 微信 / 抖音，
+养一个「住在你 Mac 里」的数字人格。
 
 她有人设、有长期记忆、有作息和情绪、会自己找话题、会发语音和表情包、能帮你动手干活，
-三个平台上还是**同一条鱼**。macOS 优先（Linux 也能跑）。
+三个平台上还是**同一条鱼**。
+
+> 🍎 **为什么是 Mac 专用**：市面上 QQ 机器人方案几乎全在 Windows / Linux（NapCat 那套）。
+> macOS 上 NapCat 装不起来（我们实测踩过，见 [docs](docs/QQ接入手册.md)），
+> 所以这里走的是 Docker 里的 OneBot 端 + 原生 macOS 桥接，做的人很少。
+> Apple Silicon / Intel 都行；Linux 也能跑，但没在 Linux 上验证过。
 
 > ### ⚠️ 先读这两份
 > - [DISCLAIMER.md](DISCLAIMER.md)：非官方接口，封号风险自担；违规使用后果自负。
