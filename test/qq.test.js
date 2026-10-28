@@ -123,6 +123,20 @@ test('extractText：数组和 CQ 字符串都能处理', () => {
   assert.equal(fromString.text, '帮我看看');
 });
 
+test('extractText：引用回复要留记号，别让她以为对方没说话', () => {
+  const r = extractText([{ type: 'reply', data: { id: '370422504' } }, text('这个呀')], SELF);
+  assert.match(r.text, /引用/);
+  assert.match(r.text, /这个呀/);
+});
+
+test('群消息：带引用回复时，前缀触发照样生效', () => {
+  const ev = groupEvent({
+    message: [{ type: 'reply', data: { id: '1' } }, text('/ai 帮我看下这个')],
+  });
+  const msg = normalizeEvent(ev, { selfId: SELF, groupAllowList: ['555555'], groupPrefix: '/ai' });
+  assert.ok(msg, '带引用的前缀消息应该照样触发');
+});
+
 /* ── 限流 ──────────────────────────────────────────────── */
 
 test('限流：每群每分钟上限，超出直接拒绝且不影响别的群', () => {

@@ -95,6 +95,9 @@ export function createRateLimiter({
   };
 }
 
+/** 引用/回复段在文本里留的记号（模型看得懂，也方便测试断言）。 */
+export const REPLY_MARKER = '（他引用了你上面那条）';
+
 /** 把 OneBot 的 message（数组或 CQ 字符串）拍平成纯文本，并记下 @ 情况。 */
 export function extractText(message, selfId) {
   if (typeof message === 'string') {
@@ -123,6 +126,11 @@ export function extractText(message, selfId) {
         else if (qq) parts.push(`@${data.name || qq} `);
         break;
       }
+      // 引用/回复：以前直接丢掉，结果他「引用她的表情包说"这个呀"」，她只看到三个字，
+      // 以为图没发出去。留个记号，她至少知道对方是在接她上面那句。
+      case 'reply':
+        parts.push(REPLY_MARKER);
+        break;
       // 表情、回复引用、文件、语音之类不参与文本，避免把控制字符喂给模型。
       default:
         break;
@@ -194,7 +202,9 @@ export function normalizeEvent(
 
     const { text: flat, atSelf, atAll } = extractText(event.message, self);
     const prefix = (groupPrefix || '').trim();
-    const hasPrefix = Boolean(prefix) && flat.toLowerCase().startsWith(prefix.toLowerCase());
+    // 引用记号会排在正文前面，判断触发前缀时要先剔掉
+    const flatForPrefix = flat.split(REPLY_MARKER).join('').trim();
+    const hasPrefix = Boolean(prefix) && flatForPrefix.toLowerCase().startsWith(prefix.toLowerCase());
     // 配置向导模式不要求触发，只要能记下群号；正常模式必须 @ 或前缀。
     if (!atSelf && !hasPrefix && !setupMode) return null;
 

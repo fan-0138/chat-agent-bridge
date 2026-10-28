@@ -24,7 +24,7 @@ function makeConfig(overrides = {}) {
   };
 }
 
-async function setup({ config = makeConfig(), runner, vision, voice, voiceOut } = {}) {
+async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, sticker, sendSticker } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'bridge-'));
   const memory = createMemory({ dir, maxTurns: 6, maxChars: 2000, log: silentLog });
   const sent = [];
@@ -43,6 +43,8 @@ async function setup({ config = makeConfig(), runner, vision, voice, voiceOut } 
     log: silentLog,
     voice,
     voiceOut,
+    sticker,
+    sendSticker,
     sendVoice: async (_target, buffer, meta) => voices.push({ size: buffer.length, ...meta }),
     reply: async (_target, text) => sent.push(text),
     vision:
@@ -50,7 +52,7 @@ async function setup({ config = makeConfig(), runner, vision, voice, voiceOut } 
         ? { available: true, reason: null, analyze: async (file) => `EVIDENCE:${file}` }
         : vision,
   });
-  return { bridge, sent, prompts, voices };
+  return { bridge, sent, prompts, voices, memory };
 }
 
 const baseMsg = {
@@ -334,4 +336,22 @@ test('思考里捞不出正文时让它重说，绝不把心里话发出去', as
   assert.equal(sent.length, 1);
   assert.ok(!sent[0].includes('刻度'), `不能把思考发出去：${sent[0]}`);
   assert.ok(!sent[0].includes('要接'));
+});
+
+/* ── 表情包 ────────────────────────────────────────────── */
+
+test('发出去的表情包要记进她的历史（不然她不知道自己刚发过图）', async () => {
+  const stickerSent = [];
+  const { bridge, memory } = await setup({
+    config: makeConfig({ stickerChance: 1 }),
+    sticker: { pick: async () => 'data/stickers/50-c5de2aa109.png' },
+    sendSticker: async (_target, file) => stickerSent.push(file),
+  });
+  await bridge.handle({ ...baseMsg });
+  assert.deepEqual(stickerSent, ['data/stickers/50-c5de2aa109.png']);
+  const turns = await memory.load('user_wxid_alice');
+  assert.ok(
+    turns.some((t) => t.role === 'assistant' && /表情包/.test(t.text)),
+    '历史里应该有一句「顺手丢了一张表情包」',
+  );
 });

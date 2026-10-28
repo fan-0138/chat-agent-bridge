@@ -284,6 +284,8 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       if (file) {
         try {
           await sendSticker(msg, file);
+          // 记进她自己的历史：不然他说「这个表情包真可爱」时，她压根不知道自己发过图
+          await memory.append(memoryKey(msg), 'assistant', '（顺手丢了一张表情包）').catch(() => {});
         } catch (error) {
           log.warn(`表情包发送失败：${error?.message ?? error}`);
         }
