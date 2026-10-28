@@ -120,6 +120,20 @@ export function decideBrowse({ state, now, config, random = Math.random }) {
   return { act: true, reason: 'ok', day, today };
 }
 
+/**
+ * 记一次「刷了抖音」。跨天要归零。
+ *
+ * 这里以前是先 `state.browseDay = day`，再拿 `state.browseDay === day` 判断要不要归零——
+ * 比较永远成立，计数就永远不跨天重置，额度只增不减。刷够上限之后 decideBrowse 天天返回
+ * daily-budget，她就再也不会去刷视频，自然也没有「刷到想分享的」、没有评论区 @主人。
+ */
+export function bumpBrowseCount(state, day) {
+  const today = state.browseDay === day ? state.browseCount ?? 0 : 0;
+  state.browseDay = day;
+  state.browseCount = today + 1;
+  return state.browseCount;
+}
+
 /** 已看过的 id 不再分享。 */
 export function unseenItems(items, seenIds = []) {
   const seen = new Set(seenIds);
@@ -392,9 +406,7 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
     const ids = items.map((entry) => entry.id).filter(Boolean);
     state.seenIds = [...new Set([...state.seenIds, ...ids])].slice(-600);
 
-    const day = localDay(now());
-    state.browseDay = day;
-    state.browseCount = (state.browseDay === day ? state.browseCount : 0) + 1;
+    bumpBrowseCount(state, localDay(now()));
     state.browseAt = now();
     setActivity('刚刷完抖音，还在回味', 45);
 

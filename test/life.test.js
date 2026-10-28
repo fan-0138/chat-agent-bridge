@@ -7,6 +7,7 @@ import {
   currentActivity,
   describeLife,
   decideBrowse,
+  bumpBrowseCount,
   unseenItems,
   scoreItem,
   pickCandidate,
@@ -124,6 +125,28 @@ test('刷抖音：当天次数用完就不刷', () => {
   const verdict = decideBrowse({ state, now: atHour(15), config });
   assert.equal(verdict.act, false);
   assert.equal(verdict.reason, 'daily-budget');
+});
+
+test('刷抖音：跨天计数会归零（防止额度永远用不完）', () => {
+  const state = { browseDay: '2026-10-26', browseCount: 8 };
+  const n = bumpBrowseCount(state, '2026-10-27');
+  assert.equal(n, 1);
+  assert.equal(state.browseDay, '2026-10-27');
+  assert.equal(state.browseCount, 1);
+});
+
+test('刷抖音：同一天累加，不会误归零', () => {
+  const state = { browseDay: '2026-10-27', browseCount: 2 };
+  assert.equal(bumpBrowseCount(state, '2026-10-27'), 3);
+});
+
+test('刷抖音：昨天刷满了，今天照样能刷（复现那条 bug）', () => {
+  const now = atHour(15);
+  const state = { browseDay: '2026-10-26', browseCount: 5, browseAt: now - 3 * 3600_000 };
+  bumpBrowseCount(state, localDay(now));
+  const verdict = decideBrowse({ state, now, config, random: () => 0 });
+  assert.equal(verdict.act, true);
+  assert.equal(verdict.today, 1);
 });
 
 test('刷抖音：两次之间要够久', () => {
