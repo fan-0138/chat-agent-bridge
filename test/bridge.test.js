@@ -355,3 +355,37 @@ test('发出去的表情包要记进她的历史（不然她不知道自己刚�
     '历史里应该有一句「顺手丢了一张表情包」',
   );
 });
+
+/* ── 打错字时把「判断独白」当正文发出去 ────────────────── */
+
+test('他打错字时，不当面分析他这句话', async () => {
+  const leaked = '我去找过你——这话有点不一样。是在说去哪里找的？\n\n这句听着不太像平常的聊天，里面带了点别的意思。我先问一句：找哪儿去了？';
+  let calls = 0;
+  const { bridge, sent } = await setup({
+    runner: {
+      async run() {
+        calls += 1;
+        return { text: calls === 1 ? leaked : '找什么给人家呀？', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-selftalk-1', text: '我去找过你' });
+  assert.ok(calls >= 2, '应该让它重说一遍');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], '找什么给人家呀？');
+});
+
+test('独白后面还有正经话时，只剥独白，不用重问', async () => {
+  let calls = 0;
+  const { bridge, sent } = await setup({
+    runner: {
+      async run() {
+        calls += 1;
+        return { text: '这句听着不太像平常聊天。\n行吧，那就当你在夸人家。', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-selftalk-2', text: '我去找过你' });
+  assert.equal(calls, 1, '正文还在就不该重问');
+  assert.equal(sent[0], '行吧，那就当你在夸人家。');
+});

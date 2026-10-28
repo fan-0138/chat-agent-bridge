@@ -82,3 +82,54 @@ export function stripThinking(text) {
   if ((candidate.match(QUOTE_DENSE) ?? []).length >= 2) return '';
   return candidate;
 }
+/* ───────────────── 第二种漏：把「我怎么看他这句话」的独白发出来 ───────────────── */
+
+/**
+ * 2026-10-28 实录：他手滑把「我去找给你」打成「我去找过你」，她回的是——
+ *   「我去找过你——这话有点不一样。是在说去哪里找的？」
+ *   「这句听着不太像平常的聊天，里面带了点别的意思。我先问一句：找哪儿去了？」
+ *
+ * 这跟「列候选」不是一回事：它不报刻度、不列句子，只是在复述他的话、评论他的用词，
+ * 顺带把自己准备怎么处理这句话念了出来。对他来说就是「她把心里那点判断说出声了」。
+ * 判据同样保守：只认「评论他那句话」的说法，宁漏不误杀。
+ */
+const SELFTALK_MARKERS = [
+  '这句听着',
+  '这句读着',
+  '这句话听着',
+  '这话听着',
+  '这话读着',
+  '这话有点',
+  '这话不太',
+  '不太像平常',
+  '不太像平时',
+  '带了点别的',
+  '我先问一句',
+  '是在说',
+];
+
+/**
+ * 这段回复像不像在「边判断他的用词边说话」？
+ * @param {string} text 她的回复
+ * @param {string} [said] 他刚才说的原话（复述+评论的要件）
+ */
+export function looksLikeSelfTalk(text, said = '') {
+  const s = String(text ?? '').trim();
+  if (!s) return false;
+  const hits = SELFTALK_MARKERS.reduce((n, marker) => (s.includes(marker) ? n + 1 : n), 0);
+  if (hits >= 2) return true;
+  // 先把他那句话原样抄一遍，再往下评论：一个记号就够了
+  const quote = String(said ?? '').trim();
+  return hits >= 1 && quote.length >= 3 && s.startsWith(quote);
+}
+
+/** 删掉带判断味道的句子，只留真正要说的话；一句都不剩就返回空（交给上层重问）。 */
+export function stripSelfTalk(text) {
+  const s = String(text ?? '').trim();
+  if (!s) return '';
+  const kept = s
+    .split(/(?<=[。！？!?…\n])/u)
+    .map((part) => part.trim())
+    .filter((part) => part && !SELFTALK_MARKERS.some((marker) => part.includes(marker)));
+  return kept.join('').trim();
+}

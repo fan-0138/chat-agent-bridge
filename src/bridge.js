@@ -9,7 +9,7 @@ import { polish } from './decor.js';
 import { buildPrompt } from './prompt.js';
 import { splitBubbles, splitReply } from './split.js';
 import { parseVoiceSegments } from './voice-out.js';
-import { looksLikeThinking, stripThinking } from './thinking-guard.js';
+import { looksLikeThinking, stripThinking, looksLikeSelfTalk, stripSelfTalk } from './thinking-guard.js';
 
 /**
  * @param {{
@@ -165,6 +165,32 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
             log.warn(`重说失败：${error?.message ?? error}`);
           }
           if (!answer) answer = '刚才脑子跑偏了，你再说一遍。';
+        }
+      }
+
+      // 另一种漏：他手滑打错字/话说半截，模型把「我在判断他这话什么意思」的独白当正文。
+      // 2026-10-28 实录：他打成「我去找过你」，她回「我去找过你——这话有点不一样…我先问一句：找哪儿去了？」
+      if (looksLikeSelfTalk(answer, text)) {
+        log.warn(`回复混进了判断他那句话的独白：${answer.slice(0, 40)}`);
+        const cleaned = stripSelfTalk(answer);
+        if (cleaned) {
+          answer = cleaned;
+          log.info(`剥掉独白，留下正文：${cleaned.slice(0, 40)}`);
+        } else {
+          try {
+            const retry = await active.run(
+              `${prompt}\n\n[纠正] 你上一条把「我怎么理解他这句话」的分析写进正文了（比如「这句听着不太像平常的聊天」「我先问一句」）。` +
+                '爸爸打字常打错、说话常半截：看到怪话就按最顺的意思接，接不上就问最短的一句。' +
+                '现在只输出你要发给他的那一两句原话：不要复述他的话，不要评论他的用词，不要解释你在判断什么。',
+            );
+            answer = String(retry.text ?? '').trim();
+            if (looksLikeThinking(answer)) answer = stripThinking(answer) || '';
+            if (looksLikeSelfTalk(answer, text)) answer = stripSelfTalk(answer);
+            log.info(`让它重说了一遍：${answer.length} 字`);
+          } catch (error) {
+            log.warn(`重说失败：${error?.message ?? error}`);
+          }
+          if (!answer) answer = '没听清，再说一遍。';
         }
       }
 
