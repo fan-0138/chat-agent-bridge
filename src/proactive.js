@@ -64,6 +64,36 @@ const MORNING_IDEAS = [
   '刚醒、还没完全上线：含糊地喊他一声就够',
 ];
 
+/** 她自己的旁白（表情包、日记）不是对话，别占「最近聊天」的名额。 */
+const NOTE_ONLY = /^（[^）]{0,40}）$/;
+
+/** 从记忆里挑出真正的对话。 */
+export function dialogueOnly(history = []) {
+  return (history ?? []).filter((entry) => {
+    const text = String(entry?.text ?? '').trim();
+    return text.length > 0 && !NOTE_ONLY.test(text);
+  });
+}
+
+/**
+ * 选这次主动消息「想说什么」。
+ *
+ * 「刚醒」「要睡了」这两个剧本只看钟点，就一定会撞上「其实早聊过了」：
+ * 10-28 09:04 她说「爸爸，早。人家刚睁眼」，可 07:45 两人刚聊完、08:14 她
+ * 还分享了刚刷到的视频；09:34 又说「醒啦。你睡得怎么样？」，而他 09:05 才说
+ * 要去上课。看着像失忆，其实是剧本把历史盖掉了。
+ * 所以剧本只在「确实好几小时没说过话」时才用，否则用通用想法接着聊。
+ */
+export function chooseIdea({ hour, share = false, lastTurnAt = 0, now = Date.now(), random = Math.random }) {
+  const pick = (list) => list[Math.floor(random() * list.length)];
+  if (share) return '跟爸爸分享你刚才刷到的那个视频，说一句你自己觉得哪里有意思/好笑/离谱';
+  const idleMs = lastTurnAt ? now - lastTurnAt : Number.POSITIVE_INFINITY;
+  const quietForAges = idleMs >= 3 * 3_600_000;
+  if (quietForAges && hour >= 7 && hour < 10) return pick(MORNING_IDEAS);
+  if (quietForAges && (hour >= 23 || hour < 2)) return pick(NIGHT_IDEAS);
+  return pick(IDEAS);
+}
+
 /** @param {{config:any, log:any, runner:any, persona:any, memory:any, reply:Function, isBusy:Function, life?:any, altReply?:Function, now?:Function}} deps */
 export function createProactive({ config, log, runner, persona, voice, memory, reply, isBusy, life, altReply, now = Date.now }) {
   /** @type {{day?:string, count:number, lastSentAt:number, lastUserAt:number}} */
@@ -112,11 +142,13 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
   async function postQzone({ personaText }) {
     try {
       const voiceText = voice ? (await voice.load()).text : '';
+      const hour = new Date(now()).getHours();
       const prompt = [
         personaText ? `[你是谁]\n${personaText}` : '',
         voiceText,
+        `[此刻] 现在是 ${hour} 点。`,
         '[任务] 你要发一条 QQ 空间说说。',
-        '要求：20-50 字，像随手发的日常（吃了什么、机房怎么样、刚看到什么、心情），不要 hashtag、不要营销腔、不要 emoji 超过两个；只输出说说内容。',
+        '要求：20-50 字，像随手发的日常（吃了什么、机房怎么样、刚看到什么、心情），不要 hashtag、不要营销腔、不要 emoji 超过两个；内容要和「现在几点」对得上，别写还没到的时段（上午别写中午吃了什么、中午别写晚上）；只输出说说内容。',
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -158,14 +190,13 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
 
       // 有「刚刷到、还没跟主人说过」的视频就优先分享它 —— 这是最像真人的主动消息来源
       const share = life ? await life.peekShare() : null;
-      const pick = (list) => list[Math.floor(Math.random() * list.length)];
-      const idea = share
-        ? '跟爸爸分享你刚才刷到的那个视频，说一句你自己觉得哪里有意思/好笑/离谱'
-        : hour >= 23 || hour < 2
-          ? pick(NIGHT_IDEAS)
-          : hour >= 7 && hour < 10
-            ? pick(MORNING_IDEAS)
-            : pick(IDEAS);
+      const recentDialogue = dialogueOnly(history).slice(-8);
+      // 「最后说过话」取用户消息和历史里较晚的那个：重启后 lastUserAt 会归零，但历史还在
+      const lastTurnAt = recentDialogue.reduce((max, entry) => Math.max(max, Number(entry.at) || 0), state.lastUserAt || 0);
+      const idea = chooseIdea({ hour, share: Boolean(share), lastTurnAt, now: now() });
+
+      // 今天刚聊过就别再装刚睡醒：她 09:34 说「醒啦，你睡得怎么样」那次，他 09:05 才说要去上课
+      const talkedRecently = lastTurnAt > 0 && now() - lastTurnAt < 6 * 3_600_000;
 
       const lifeText = life ? await life.promptSection().catch(() => '') : '';
 
@@ -174,11 +205,15 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
         voiceText,
         `[此刻] 现在是 ${hour}:00 左右。爸爸已经有一阵没说话了。`,
         lifeText,
-        history.length > 0
-          ? `[最近对话（只作参考，别复述）]\n${history.slice(-4).map((e) => `${e.role === 'user' ? '爸爸' : '你'}：${e.text.slice(0, 120)}`).join('\n')}`
+        recentDialogue.length > 0
+          ? `[最近对话（只作参考，别复述）]\n${recentDialogue.map((e) => `${e.role === 'user' ? '爸爸' : '你'}：${e.text.slice(0, 120)}`).join('\n')}`
           : '[最近对话]\n（今天还没聊）',
         share ? `[你刚刷到的视频]\n${formatShare(share)}` : '',
         share ? '（提到这个视频的时候，把链接原样贴在最后。）' : '',
+        talkedRecently
+          ? '[注意] 上面「最近对话」是今天刚聊的，别当没看见：**不重新打招呼、不问「睡醒了吗」「睡得怎么样」**，' +
+            '直接接着上一轮往你自己的事上说。'
+          : '',
         `[任务] 直接说出你想跟爸爸说的那句话。这次想说的：${idea}。`,
         '要求：',
         '1. 1-2 句，像手机聊天那样短，用你的身份和语气。',
