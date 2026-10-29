@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, chooseIdea, dialogueOnly, describeMoment, looksLikeAbsenceClaim } from '../src/proactive.js';
+import {
+  decide,
+  chooseIdea,
+  dialogueOnly,
+  describeMoment,
+  looksLikeAbsenceClaim,
+  createProactive,
+} from '../src/proactive.js';
 
 const config = {
   proactiveEnabled: true,
@@ -139,4 +146,93 @@ test('隔了大半天：才允许用查岗/想他那一套', () => {
     seen.add(chooseIdea({ hour: 21, lastTurnAt: now - 6 * HOUR, now }));
   }
   assert.ok([...seen].some((idea) => /半天没理|戳一下|想他了/.test(idea)), '很久没说话时应该有查岗类想法');
+});
+
+/* ───────── 分享抖音视频时截图（图先到，话后到） ───────── */
+
+test('分享视频：先截一张图发过去，再说话', async () => {
+  const events = [];
+  const share = {
+    id: '1234567890123456789',
+    desc: '这条视频的标题',
+    url: 'https://www.douyin.com/video/1234567890123456789',
+    likes: 2000,
+    comments: 80,
+    tags: [],
+    author: '某作者',
+  };
+  const proactive = createProactive({
+    config: {
+      proactiveEnabled: true,
+      proactiveMaxPerDay: 3,
+      proactiveMinGapMin: 90,
+      proactiveAfterIdleMin: 45,
+      proactiveQuietStart: 0,
+      proactiveQuietEnd: 0,
+      proactiveChance: 1,
+      proactiveCommentChance: 0,
+      proactiveQzoneChance: 0,
+      proactiveDouyinChance: 0,
+      allowList: ['123456789'],
+      emojiMax: 2,
+    },
+    log: { info() {}, warn() {}, debug() {} },
+    runner: { async run() { return { text: '这个笑死。', durationMs: 5 }; } },
+    persona: async () => '你是鲸',
+    voice: null,
+    memory: { async load() { return []; }, async append() {} },
+    reply: async (_msg, text) => events.push(['text', text]),
+    isBusy: () => false,
+    life: {
+      async peekShare() { return share; },
+      async promptSection() { return ''; },
+      async clearShare() {},
+    },
+    captureShot: async (item) => {
+      events.push(['shot', item.url]);
+      return '/tmp/shot.png';
+    },
+    sendImage: async (_msg, file) => events.push(['image', file]),
+  });
+  await proactive._tick();
+  assert.deepEqual(events[0], ['shot', share.url], '先截图');
+  assert.deepEqual(events[1], ['image', '/tmp/shot.png'], '把图发过去');
+  assert.equal(events[2][0], 'text', '然后才是话');
+});
+
+test('截图失败不影响发消息', async () => {
+  const events = [];
+  const proactive = createProactive({
+    config: {
+      proactiveEnabled: true,
+      proactiveMaxPerDay: 3,
+      proactiveMinGapMin: 90,
+      proactiveAfterIdleMin: 45,
+      proactiveQuietStart: 0,
+      proactiveQuietEnd: 0,
+      proactiveChance: 1,
+      proactiveCommentChance: 0,
+      proactiveQzoneChance: 0,
+      proactiveDouyinChance: 0,
+      allowList: ['123456789'],
+      emojiMax: 2,
+    },
+    log: { info() {}, warn() {}, debug() {} },
+    runner: { async run() { return { text: '嗯。', durationMs: 5 }; } },
+    persona: async () => '',
+    memory: { async load() { return []; }, async append() {} },
+    reply: async (_msg, text) => events.push(['text', text]),
+    isBusy: () => false,
+    life: {
+      async peekShare() { return { id: '9', url: 'https://www.douyin.com/video/9' }; },
+      async promptSection() { return ''; },
+      async clearShare() {},
+    },
+    captureShot: async () => {
+      throw new Error('浏览器没开');
+    },
+    sendImage: async () => events.push(['image', '不应该发']),
+  });
+  await proactive._tick();
+  assert.deepEqual(events, [['text', '嗯。']]);
 });

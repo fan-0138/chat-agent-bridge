@@ -127,7 +127,7 @@ export function describeMoment({ now = Date.now(), idleMin = null, lastSaid = ''
 }
 
 /** @param {{config:any, log:any, runner:any, persona:any, memory:any, reply:Function, isBusy:Function, life?:any, altReply?:Function, now?:Function}} deps */
-export function createProactive({ config, log, runner, persona, voice, memory, reply, isBusy, life, altReply, now = Date.now }) {
+export function createProactive({ config, log, runner, persona, voice, memory, reply, isBusy, life, altReply, captureShot, sendImage, now = Date.now }) {
   /** @type {{day?:string, count:number, lastSentAt:number, lastUserAt:number}} */
   const state = { count: 0, lastSentAt: 0, lastUserAt: 0 };
   let timer = null;
@@ -222,6 +222,8 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
 
       // 有「刚刷到、还没跟主人说过」的视频就优先分享它 —— 这是最像真人的主动消息来源
       const share = life ? await life.peekShare() : null;
+      // 一边让她想说什么，一边把视频截下来（截图 3-5 秒，正好跟生成并行）
+      const shotPromise = share && captureShot ? Promise.resolve(captureShot(share)).catch(() => null) : Promise.resolve(null);
       const recentDialogue = dialogueOnly(history).slice(-8);
       // 「最后说过话」取用户消息和历史里较晚的那个：重启后 lastUserAt 会归零，但历史还在
       const lastTurnAt = recentDialogue.reduce((max, entry) => Math.max(max, Number(entry.at) || 0), state.lastUserAt || 0);
@@ -292,6 +294,14 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
         await altReply(body);
         log.info('主动消息已发到抖音私信');
       } else {
+        const shotFile = await shotPromise;
+        if (shotFile && sendImage) {
+          // 先甩图再说话，像真人分享「你看这个」
+          await sendImage({ senderId: target, conversationId, groupId: undefined }, shotFile).catch((error) =>
+            log.warn(`分享图没发出去：${error?.message ?? error}`),
+          );
+          log.info(`分享的视频截了图：${String(shotFile).split('/').pop()}`);
+        }
         await reply({ senderId: target, conversationId, groupId: undefined }, body);
       }
       if (share && life) {

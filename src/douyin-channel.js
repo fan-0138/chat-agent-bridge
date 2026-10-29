@@ -15,7 +15,7 @@
  */
 
 import { resolve, join } from 'node:path';
-import { readFile, writeFile, mkdir, unlink, appendFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, unlink, appendFile, readdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { polish } from './decor.js';
 import { UNSUPPORTED_PATTERN, assignSides, isUnsupportedMessage, pickInbound } from './douyin-side.js';
@@ -786,6 +786,54 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
     }
   }
 
+  /**
+   * 给一条视频截一张图 —— 就是她「看到的那一帧」。
+   *
+   * 她分享视频时以前只甩个链接，主人未必点；截一张图，跟他聊起来才有画面。
+   * 用同一个常驻浏览器开个隐藏页，截完就关。
+   * @param {{url: string, id?: string}} share
+   * @returns {Promise<string|null>} 本地 png 路径，失败就 null（绝不影响发消息）
+   */
+  async function captureShot(share) {
+    const url = typeof share === 'string' ? share : share?.url;
+    if (!url) return null;
+    const dir = resolve(process.cwd(), 'data/douyin/shots');
+    // 存 jpg：整页截图 PNG 有 800KB 左右，走 base64 塞进 NapCat 太重
+    const file = resolve(dir, `${(typeof share === 'object' && share?.id) || Date.now()}.jpg`);
+    let shotPage = null;
+    try {
+      await mkdir(dir, { recursive: true });
+      if (!context && !(await ensureBrowser())) return null;
+      shotPage = await newHiddenPage();
+      await shotPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+      await sleep(2_200 + Math.random() * 900);
+      // 音量提示、登录浮层挡在画面上就点掉/滚一下
+      await shotPage.locator('text=打开声音').first().click({ timeout: 1_500 }).catch(() => {});
+      await shotPage.mouse.move(700, 420).catch(() => {});
+      await sleep(600);
+      await shotPage.screenshot({ path: file, type: 'jpeg', quality: 82 });
+      log.info(`给视频截了张图：${file.split('/').pop()}`);
+      await pruneShots(dir);
+      return file;
+    } catch (error) {
+      log.warn(`截图失败（${error?.message ?? error}）`);
+      return null;
+    } finally {
+      await shotPage?.close().catch(() => {});
+    }
+  }
+
+  /** 截图只留最近 80 张，别让 data/ 长胖。 */
+  async function pruneShots(dir) {
+    try {
+      const names = (await readdir(dir)).sort();
+      if (names.length <= 80) return;
+      for (const name of names.slice(0, names.length - 80)) await unlink(resolve(dir, name)).catch(() => {});
+    } catch {
+      /* 清理失败不影响正事 */
+    }
+  }
+
   /** 处理 life.js 塞进来的刷视频请求。 */
   async function handleBrowseRequest() {
     const requestFile = resolve(process.cwd(), 'data/douyin/browse-request.json');
@@ -1211,6 +1259,7 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
       await unlink(resolve(process.cwd(), 'data/douyin/browser.lock')).catch(() => {});
     },
     _tick: tick,
+    captureShot,
     historyDir,
   };
 }

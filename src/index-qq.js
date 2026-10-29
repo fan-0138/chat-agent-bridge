@@ -255,6 +255,9 @@ async function main() {
       return stats.active + stats.waiting > 0;
     },
     reply: transport.reply,
+    // 分享抖音视频时顺手截一张（douyinChat 这时候还没建，用闭包取）
+    captureShot: (share) => douyinChat?.captureShot?.(share) ?? null,
+    sendImage: transport.sendImage,
     life,
   });
   proactive.start();
