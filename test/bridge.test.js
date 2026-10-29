@@ -4,6 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
+import { notesFrom } from '../src/prompt.js';
 import { createVoice } from '../src/voice.js';
 import { createMemory } from '../src/memory.js';
 import { KeyedQueue } from '../src/queue.js';
@@ -388,4 +389,42 @@ test('独白后面还有正经话时，只剥独白，不用重问', async () =>
   await bridge.handle({ ...baseMsg, id: 'm-selftalk-2', text: '我去找过你' });
   assert.equal(calls, 1, '正文还在就不该重问');
   assert.equal(sent[0], '行吧，那就当你在夸人家。');
+});
+
+/* ── 她自己发的「刚刷到…」不占他的位置 ────────────────── */
+
+test('主动消息摘成一行摘要，别把他的话挤出历史', async () => {
+  const prompts = [];
+  const { bridge, memory } = await setup({
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '嗯，知道了。', durationMs: 5 };
+      },
+    },
+  });
+  const key = 'user_wxid_alice';
+  await memory.append(key, 'assistant', '刚刷到个鲸鱼视频，人家又刷到了', { kind: 'proactive' });
+  await memory.append(key, 'user', '这个前几天你给我看过了');
+  await memory.append(key, 'assistant', '忘了，人家刷多了记串');
+  await bridge.handle({ ...baseMsg, id: 'm-notes-1', text: '那你怎么没回人家' });
+  const p = prompts[0];
+  assert.match(p, /你今天自己主动说过/, '应该单列一段「今天自己说过什么」');
+  const histStart = p.indexOf('[历史对话');
+  const notesStart = p.indexOf('[你今天自己主动说过');
+  const hist = p.slice(histStart, notesStart);
+  assert.ok(!hist.includes('刚刷到个鲸鱼视频'), `主动消息不该占历史位：${hist.slice(-120)}`);
+  assert.ok(hist.includes('忘了，人家刷多了记串'), '真正的对话要在历史里');
+  assert.ok(p.slice(notesStart).includes('刚刷到个鲸鱼视频'), '摘要里要有，免得她又说一遍');
+});
+
+test('notesFrom：只收主动消息，带时间，压到 30 字', () => {
+  const notes = notesFrom([
+    { role: 'assistant', text: '用户回的话', at: 1 },
+    { role: 'assistant', text: '刚刷到周杰伦的歌，前奏一响人就跟着摇', at: new Date(2026, 9, 29, 9, 12).getTime(), kind: 'proactive' },
+    { role: 'assistant', text: '', at: 2, kind: 'proactive' },
+  ]);
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].startsWith('09:12 '), true, notes[0]);
+  assert.ok(notes[0].length <= 36, notes[0]);
 });

@@ -36,6 +36,9 @@ export function createMemory({ dir, maxTurns, maxChars, log }) {
           text: entry.text,
           // 留着时间戳：主动消息要判断「今天是不是刚聊过」，否则一重启就当成好久没说话
           at: Number(entry.at) || 0,
+          // 主动消息要标出来：不然她一天发的十来条「刚刷到」会把他的消息挤出上下文，
+          // 看着就像她记不住他说过什么。
+          ...(typeof entry.kind === 'string' && entry.kind ? { kind: entry.kind } : {}),
         }));
     } catch (error) {
       if (error.code !== 'ENOENT') log.warn(`读取记忆失败 ${file}: ${error.message}`);
@@ -45,16 +48,17 @@ export function createMemory({ dir, maxTurns, maxChars, log }) {
     return trimmed;
   }
 
-  async function append(key, role, text) {
+  async function append(key, role, text, meta = {}) {
     const entries = await load(key);
     const at = Date.now();
-    entries.push({ role, text, at });
+    const entry = { role, text, at, ...meta };
+    entries.push(entry);
     const next = trimEntries(entries, maxTurns, maxChars);
     cache.set(key, next);
 
     const file = fileFor(key);
     await mkdir(dirname(file), { recursive: true });
-    await appendFile(file, `${JSON.stringify({ role, text, at })}\n`, 'utf8');
+    await appendFile(file, `${JSON.stringify(entry)}\n`, 'utf8');
 
     // 文件增长到一定程度后按内存视图重写，避免无限膨胀。
     if (await fileSize(file) > COMPACT_BYTES) {

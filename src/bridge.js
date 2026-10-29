@@ -6,10 +6,11 @@
 import { DshError } from './dsh.js';
 import { isTaskMessage } from './classify.js';
 import { polish } from './decor.js';
-import { buildPrompt } from './prompt.js';
+import { buildPrompt, notesFrom } from './prompt.js';
 import { splitBubbles, splitReply } from './split.js';
 import { parseVoiceSegments } from './voice-out.js';
 import { looksLikeThinking, stripThinking, looksLikeSelfTalk, stripSelfTalk } from './thinking-guard.js';
+
 
 /**
  * @param {{
@@ -101,6 +102,9 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     }
 
     const history = await memory.load(key);
+    // 她自己主动发的（「刚刷到…」）单独摘出来：一天十来条，全塞进历史会把他刚说的话挤出去
+    const notes = notesFrom(history);
+    const dialogue = history.filter((entry) => entry.kind !== 'proactive');
     const personaText = persona ? await persona() : '';
     const voiceText = voice ? (await voice.load()).text : '';
     const slangText = slang ? (await slang.load()).text : '';
@@ -123,7 +127,8 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       persona: personaText,
       voice: voiceText,
       slang: slangText,
-      history,
+      history: dialogue,
+      notes,
       text,
       senderName: msg.senderName || '用户',
       roomName: msg.roomName,

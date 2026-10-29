@@ -19,7 +19,7 @@ import { readFile, writeFile, mkdir, unlink, appendFile } from 'node:fs/promises
 import { chromium } from 'playwright';
 import { polish } from './decor.js';
 import { UNSUPPORTED_PATTERN, assignSides, isUnsupportedMessage, pickInbound } from './douyin-side.js';
-import { buildPrompt } from './prompt.js';
+import { buildPrompt, notesFrom } from './prompt.js';
 import { splitBubbles } from './split.js';
 import { likeVideo } from '../scripts/lib/douyin-browser.mjs';
 import { postComment } from '../scripts/lib/douyin-comments.js';
@@ -663,7 +663,10 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
         : '[主人发来的抖音视频]\n（链接打得开但没读出内容，可以让他说说是啥）';
     }
 
-    const history = await historyOf(name);
+    const fullHistory = await historyOf(name);
+    // 她自己主动发的单独摘出来，不占对话历史（同 QQ 侧）
+    const notes = notesFrom(fullHistory);
+    const history = fullHistory.filter((entry) => entry.kind !== 'proactive');
 
     const personaText = persona ? await persona().catch(() => '') : '';
     const voiceText = voice ? (await voice.load()).text : '';
@@ -673,6 +676,7 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
       voice: voiceText,
       slang: slangText,
       history,
+      notes,
       // 占位文案别原样喂给模型，换成人话
       text: newest.unsupported ? '（发来一条网页版看不到内容的消息）' : newest.text,
       senderName: name,

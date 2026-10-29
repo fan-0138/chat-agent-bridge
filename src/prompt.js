@@ -3,6 +3,25 @@
  * 因此把历史对话作为「参考资料」注入，并明确告诉模型当前渠道是微信还是 QQ。
  */
 
+/**
+ * 把「她主动发的」压成一行行摘要（时间 + 开头 30 字）。
+ *
+ * 为什么要摘出来：她一天主动发十来条「刚刷到…」，历史窗口（默认 8 轮 = 16 条）
+ * 里 12 条是她自己的广播，他刚说的话被挤到窗口外——看起来就像她记不住他说什么。
+ * 摘成一行行小字，她既知道自己今天说过什么（不会把同一个视频发两遍），
+ * 也不占对话的位置。
+ */
+export function notesFrom(history = []) {
+  return (history ?? [])
+    .filter((entry) => entry?.kind === 'proactive' && entry.text)
+    .slice(-12)
+    .map((entry) => {
+      const when = entry.at ? new Date(entry.at) : null;
+      const clock = when ? `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')} ` : '';
+      return `${clock}${String(entry.text).replace(/\s+/g, ' ').trim().slice(0, 30)}`;
+    });
+}
+
 const CHANNEL_RULES = {
   wechat: [
     '你现在通过微信与用户对话，对方在手机上看你的回复。',
@@ -26,6 +45,7 @@ const CHANNEL_RULES = {
     '每句话都要跟上一句咬合：接不上就不补这一句，宁可只回一句。',
     '心里怎么挑词是你的自由，但**别把心里话打出来**：不要列候选句子、不要提「刻度/要接/收住/别用唔开头」这类自我指挥，只发你最后决定说的那几句。',
     '爸爸打字常常打错、漏字、说半句。看到一句怪怪的话，先按最顺的意思接；实在接不上就问最短的一句（「？」「什么呀」「没懂」）。',
+    '他说「人家」时不一定指你自己：上一句在讲鲸、讲鱼、讲视频，他说的「人家」就是那个东西。先看上一句在讲什么，别一看到「人家」就当他在说他自己没回你。',
     '**也别把你对他的判断说出来**：不要复述他的话再点评用词（「这话有点不一样」「这句听着不太像平常聊天」「带了点别的意思」「我先问一句」），心里怎么琢磨都行，只发你决定说的那句。',
     '**这是聊天，不是任务**：没让你查东西就别跑命令、翻日志、看代码；想不起来就说不记得。',
     '主人问「你怎么没回 / 怎么不说话 / 咋不理我」→ 直接答（没看到 / 在忙 / 懒得动），不要当场去查为什么。',
@@ -39,6 +59,7 @@ const CHANNEL_RULES = {
  * @param {{
  *   persona?: string,
  *   history: Array<{role: 'user'|'assistant', text: string}>,
+ *   notes?: string[],
  *   text: string,
  *   senderName: string,
  *   roomName?: string,
@@ -47,7 +68,7 @@ const CHANNEL_RULES = {
  *   extra?: string,
  * }} input
  */
-export function buildPrompt({ persona, voice, slang, history, text, senderName, roomName, attachment, channel = 'wechat', life, extra }) {
+export function buildPrompt({ persona, voice, slang, history, notes, text, senderName, roomName, attachment, channel = 'wechat', life, extra }) {
   const sections = [];
 
   if (persona) {
@@ -78,6 +99,12 @@ export function buildPrompt({ persona, voice, slang, history, text, senderName, 
         '（这些是**之前**的对话。那时她的说话方式还没改，别把里面「唔……」「尾巴」那套腔调学回来——只参考说了什么，不参考怎么说。）\n' +
         '（**最后两轮是紧接着的上一轮**，接着往下说。对方只回「嗯」「哦」「好」「行」「1」这种一两个字的接话时，' +
         '是在接你上一句，不是在敲门：顺着上一句收尾就好，**别问「在。什么事」「怎么了」这种像刚接通的话**。）',
+    );
+  }
+
+  if (Array.isArray(notes) && notes.length > 0) {
+    sections.push(
+      `[你今天自己主动说过/发过的（挑话题时看一眼，**别再说一遍、别重发同一个视频**）]\n${notes.join('\n')}`,
     );
   }
 

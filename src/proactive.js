@@ -311,7 +311,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       state.day = day;
       state.count = (state.day === day ? verdict.sentToday : state.count) + 1;
       state.lastSentAt = now();
-      await memory.append(memoryKey, 'assistant', body);
+      await memory.append(memoryKey, 'assistant', body, { kind: 'proactive' });
       log.info(`主动消息已发送（今日第 ${state.count}/${config.proactiveMaxPerDay} 条）`);
     } catch (error) {
       log.warn(`主动消息失败：${error?.message ?? error}`);
