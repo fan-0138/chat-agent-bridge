@@ -30,6 +30,14 @@ import { looksLikeThinking, stripThinking, looksLikeSelfTalk, stripSelfTalk } fr
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function createBridge({ config, runner, chatRunner, memory, queue, log, reply, typing, persona, voice, slang, vision, onActivity, life, sticker, sendSticker, voiceOut, sendVoice }) {
+  /**
+   * 上一轮是不是卡超时了。
+   * 她看不到系统这一层：10-29 19:45 那轮 DSH 超时，系统自动发了句「这个卡住了」，
+   * 半小时后主动消息接上，他问「怎么这么久才回」，她只能编一个「刷抖音忘了时间」。
+   * 记下来，下一轮把实情告诉她，别让她瞎猜。
+   * @type {Map<string, number>}
+   */
+  const failedTurns = new Map();
   const seen = new Set();
   const unknownNotified = new Map();
 
@@ -87,6 +95,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
         error instanceof DshError && error.timedOut
           ? '这个卡住了，人家等下再弄。'
           : '没弄成，等会儿再试试。';
+      if (error instanceof DshError && error.timedOut) failedTurns.set(key, Date.now());
       await safeReply(msg, message);
     }
   }
@@ -123,12 +132,30 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
 
     const lifeText = life ? await life.promptSection().catch(() => '') : '';
 
+    // 他隔了多久才收到回复：不写清楚，她就会自己编（「才二十分钟不到」其实三十多分钟）
+    const lastUserAt = [...dialogue].reverse().find((entry) => entry.role === 'user')?.at ?? 0;
+    const gapMin = lastUserAt > 0 ? Math.round((Date.now() - lastUserAt) / 60_000) : 0;
+    const extraLines = [];
+    if (gapMin >= 5) {
+      extraLines.push(
+        `[时间] 他上一条消息是 ${gapMin} 分钟前发的，你隔了一会儿才回。别把时间说小（别说「才几分钟」），也别编理由。`,
+      );
+    }
+    const failedAt = failedTurns.get(key);
+    if (failedAt && Date.now() - failedAt < 3 * 3_600_000) {
+      extraLines.push(
+        '[系统] 上一轮你回的时候卡超时了（系统只自动发出去一句「这个卡住了，人家等下再弄。」），不是你没看见，也不是你在刷抖音。' +
+          '他要是问你回得慢，就直说刚才卡了一下。',
+      );
+    }
+
     const prompt = buildPrompt({
       persona: personaText,
       voice: voiceText,
       slang: slangText,
       history: dialogue,
       notes,
+      extra: extraLines.join('\n\n'),
       text,
       senderName: msg.senderName || '用户',
       roomName: msg.roomName,
@@ -206,6 +233,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
         .slice(-2);
       const output = polish(answer, { recent, maxEmoji: config.emojiMax ?? 2 });
       const userTurn = msg.type === 'media' ? `[${msg.kind === 'image' ? '图片' : msg.kind}]${text ? ` ${text}` : ''}` : text;
+      failedTurns.delete(key);
       await memory.append(key, 'user', userTurn);
       await memory.append(key, 'assistant', output);
       log.info(`完成 ${key} ${Math.round(durationMs / 1000)}s ${output.length}chars${output === raw.trim() ? '' : '（已去重）'}`);

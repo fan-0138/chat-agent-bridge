@@ -4,6 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
+import { DshError } from '../src/dsh.js';
 import { notesFrom } from '../src/prompt.js';
 import { createVoice } from '../src/voice.js';
 import { createMemory } from '../src/memory.js';
@@ -427,4 +428,42 @@ test('notesFrom：只收主动消息，带时间，压到 30 字', () => {
   assert.equal(notes.length, 1);
   assert.equal(notes[0].startsWith('09:12 '), true, notes[0]);
   assert.ok(notes[0].length <= 36, notes[0]);
+});
+
+/* ── 卡超时 / 隔很久才回：别让她自己编理由 ────────────────── */
+
+test('他隔了半小时才收到回复：prompt 里写清真实间隔', async () => {
+  const prompts = [];
+  const { bridge, memory } = await setup({
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '刚才卡了一下。', durationMs: 5 };
+      },
+    },
+  });
+  const key = 'user_wxid_alice';
+  await memory.append(key, 'user', '上一句', { at: Date.now() - 34 * 60_000 });
+  await memory.append(key, 'assistant', '上一句的回复');
+  await bridge.handle({ ...baseMsg, id: 'm-gap-1', text: '怎么这么久才回' });
+  assert.match(prompts[0], /\[时间\] 他上一条消息是 3[34] 分钟前发的/, prompts[0].slice(0, 200));
+});
+
+test('上一轮超时过：下一轮告诉她实情，别编刷抖音', async () => {
+  const prompts = [];
+  let call = 0;
+  const { bridge } = await setup({
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        call += 1;
+        if (call === 1) throw new DshError('DSH 超时（90s）', { timedOut: true });
+        return { text: '刚才卡了一下，不是不理你。', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-timeout-1', text: '第一句' });
+  await bridge.handle({ ...baseMsg, id: 'm-timeout-2', text: '怎么这么久才回' });
+  assert.match(prompts[1], /\[系统\] 上一轮你回的时候卡超时了/, prompts[1].slice(-400));
+  assert.match(prompts[1], /就直说刚才卡了一下/);
 });
