@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, chooseIdea, dialogueOnly } from '../src/proactive.js';
+import { decide, chooseIdea, dialogueOnly, describeMoment, looksLikeAbsenceClaim } from '../src/proactive.js';
 
 const config = {
   proactiveEnabled: true,
@@ -98,4 +98,45 @@ test('有刚刷到的视频时，分享优先于作息剧本', () => {
   const now = atHour(9);
   const idea = chooseIdea({ hour: 9, share: true, lastTurnAt: 0, now, random: () => 0 });
   assert.match(idea, /视频/);
+});
+
+/* ───────── 「他好像不在了」不能瞎编（2026-10-28 21:32 实录） ───────── */
+
+test('此刻：他 19 分钟前刚说完话，就写清楚是 19 分钟', () => {
+  const now = new Date(2026, 9, 28, 21, 32, 0).getTime();
+  const line = describeMoment({ now, idleMin: 19, lastSaid: '这是代码逻辑哦' });
+  assert.match(line, /21:32/);
+  assert.match(line, /19 分钟前刚说过话/);
+  assert.match(line, /这是代码逻辑哦/);
+  assert.doesNotMatch(line, /有一阵没说话/);
+});
+
+test('此刻：隔了几个小时才写成小时', () => {
+  const now = new Date(2026, 9, 28, 21, 32, 0).getTime();
+  assert.match(describeMoment({ now, idleMin: 200 }), /3 小时前/);
+  assert.match(describeMoment({ now, idleMin: null }), /今天还没聊过/);
+});
+
+test('认出「他还没回来 / 好久没理我」这种编的话', () => {
+  assert.equal(looksLikeAbsenceClaim('爸爸还没回来啊。\n\n人家想你了。今天过得怎么样？'), true);
+  assert.equal(looksLikeAbsenceClaim('爸爸这么久都不理本鲸'), true);
+  assert.equal(looksLikeAbsenceClaim('人家想你了。今天过得怎么样？'), false);
+  assert.equal(looksLikeAbsenceClaim('剩的半碗饭扒完了，爸爸吃了吗'), false);
+});
+
+test('刚聊过 20 分钟：不给「人呢 / 想他」这类查岗想法', () => {
+  const now = atHour(21);
+  for (let i = 0; i < 300; i += 1) {
+    const idea = chooseIdea({ hour: 21, lastTurnAt: now - 20 * 60_000, now });
+    assert.doesNotMatch(idea, /半天没理|戳一下|人呢/);
+  }
+});
+
+test('隔了大半天：才允许用查岗/想他那一套', () => {
+  const now = atHour(21);
+  const seen = new Set();
+  for (let i = 0; i < 300; i += 1) {
+    seen.add(chooseIdea({ hour: 21, lastTurnAt: now - 6 * HOUR, now }));
+  }
+  assert.ok([...seen].some((idea) => /半天没理|戳一下|想他了/.test(idea)), '很久没说话时应该有查岗类想法');
 });

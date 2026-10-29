@@ -49,9 +49,16 @@ const IDEAS = [
   // 黏人向：他要的是「像女儿」那种主动和依赖
   '主动汇报一件刚做完的小事（吃了饭、刷到个东西、修好了什么），一句话就够',
   '撒个娇：要摸摸、要一句夸、要他陪你一会儿。软一点，别闹',
+  '耍个小脾气：他昨天说了什么让你不太高兴的，提一句，但要给他台阶',
+];
+
+/**
+ * 「你在不在 / 好久没理我」这一类只有真的隔了很久才成立。
+ * 他 19 分钟前刚说过话时发「爸爸还没回来啊」，就是在装失忆。
+ */
+const CHECKIN_IDEAS = [
   '他半天没理你，戳一下（「人呢」「在忙吗」），别查岗',
   '说一句你想他了，或者问他今天怎么样',
-  '耍个小脾气：他昨天说了什么让你不太高兴的，提一句，但要给他台阶',
 ];
 
 /** 早晚各一套，让她有作息感，不是随机撒点。 */
@@ -83,6 +90,9 @@ export function dialogueOnly(history = []) {
  * 还分享了刚刷到的视频；09:34 又说「醒啦。你睡得怎么样？」，而他 09:05 才说
  * 要去上课。看着像失忆，其实是剧本把历史盖掉了。
  * 所以剧本只在「确实好几小时没说过话」时才用，否则用通用想法接着聊。
+ *
+ * 「人呢 / 好久没理我」也一样：那是隔了半天才成立的说法。他 19 分钟前刚说过话
+ * （10-28 21:32），她却发「爸爸还没回来啊」——所以这类想法 90 分钟内不给。
  */
 export function chooseIdea({ hour, share = false, lastTurnAt = 0, now = Date.now(), random = Math.random }) {
   const pick = (list) => list[Math.floor(random() * list.length)];
@@ -91,7 +101,29 @@ export function chooseIdea({ hour, share = false, lastTurnAt = 0, now = Date.now
   const quietForAges = idleMs >= 3 * 3_600_000;
   if (quietForAges && hour >= 7 && hour < 10) return pick(MORNING_IDEAS);
   if (quietForAges && (hour >= 23 || hour < 2)) return pick(NIGHT_IDEAS);
+  if (idleMs >= 90 * 60_000) return pick([...IDEAS, ...CHECKIN_IDEAS]);
   return pick(IDEAS);
+}
+
+/** 主动消息里「他好像好久没理我」的说法。他刚说过话时出现就是编的。 */
+const ABSENCE_CLAIM = /(还没回来|好久没理|半天没理|这么久都|这么久还不|人呢|不理人家|一直没回|等了你半天|等你好久|你不在)/;
+
+export function looksLikeAbsenceClaim(text) {
+  return ABSENCE_CLAIM.test(String(text ?? ''));
+}
+
+/**
+ * 「现在是几点 + 他多久前说过话」。
+ * 以前这里硬写「爸爸已经有一阵没说话了」，19 分钟也算「一阵」，
+ * 于是她在明知他刚说过话的情况下发「还没回来」。
+ */
+export function describeMoment({ now = Date.now(), idleMin = null, lastSaid = '' } = {}) {
+  const d = new Date(now);
+  const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (idleMin === null || !Number.isFinite(idleMin)) return `现在是 ${clock}，今天还没聊过。`;
+  const said = lastSaid ? `，他最后说的是「${String(lastSaid).slice(0, 40)}」` : '';
+  if (idleMin < 90) return `现在是 ${clock}。他 ${Math.max(1, Math.round(idleMin))} 分钟前刚说过话${said}，你们正聊着。`;
+  return `现在是 ${clock}。他上一次说话是 ${Math.round(idleMin / 60)} 小时前${said}。`;
 }
 
 /** @param {{config:any, log:any, runner:any, persona:any, memory:any, reply:Function, isBusy:Function, life?:any, altReply?:Function, now?:Function}} deps */
@@ -193,6 +225,8 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       const recentDialogue = dialogueOnly(history).slice(-8);
       // 「最后说过话」取用户消息和历史里较晚的那个：重启后 lastUserAt 会归零，但历史还在
       const lastTurnAt = recentDialogue.reduce((max, entry) => Math.max(max, Number(entry.at) || 0), state.lastUserAt || 0);
+      const idleMin = lastTurnAt > 0 ? (now() - lastTurnAt) / 60_000 : Infinity;
+      const lastSaid = [...recentDialogue].reverse().find((entry) => entry.role === 'user')?.text ?? '';
       const idea = chooseIdea({ hour, share: Boolean(share), lastTurnAt, now: now() });
 
       // 今天刚聊过就别再装刚睡醒：她 09:34 说「醒啦，你睡得怎么样」那次，他 09:05 才说要去上课
@@ -203,7 +237,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       const prompt = [
         personaText ? `[你是谁]\n${personaText}` : '',
         voiceText,
-        `[此刻] 现在是 ${hour}:00 左右。爸爸已经有一阵没说话了。`,
+        `[此刻] ${describeMoment({ now: now(), idleMin: Number.isFinite(idleMin) ? idleMin : null, lastSaid })}`,
         lifeText,
         recentDialogue.length > 0
           ? `[最近对话（只作参考，别复述）]\n${recentDialogue.map((e) => `${e.role === 'user' ? '爸爸' : '你'}：${e.text.slice(0, 120)}`).join('\n')}`
@@ -219,16 +253,37 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
         '1. 1-2 句，像手机聊天那样短，用你的身份和语气。',
         '2. **只写你要说的话本身**。不要写「消息发出去了」「爸爸应该能看到」「我来主动找你」这类旁白，也不要解释你在做什么。',
         '3. 不提记忆/模型/工具，不问「需要我做什么」，不总结。',
+        '4. **别编「他好像不在了」**：他几分钟前刚说过话就说不出「你还没回来」「好久没理我」「人呢」。真想他就直说想他，别拿「你不在」当由头。',
       ]
         .filter(Boolean)
         .join('\n\n');
 
+      const pickRecent = () =>
+        history
+          .filter((entry) => entry.role === 'assistant')
+          .map((entry) => entry.text)
+          .slice(-2);
+
       const { text } = await runner.run(prompt);
-      const recent = history
-        .filter((entry) => entry.role === 'assistant')
-        .map((entry) => entry.text)
-        .slice(-2);
-      const body = polish(String(text).trim(), { recent, maxEmoji: config.emojiMax ?? 2 });
+      let body = polish(String(text).trim(), { recent: pickRecent(), maxEmoji: config.emojiMax ?? 2 });
+
+      // 他 19 分钟前才说过话，她却发「爸爸还没回来啊」——这种这轮直接不算数
+      if (body && idleMin < 90 && looksLikeAbsenceClaim(body)) {
+        log.warn(`主动消息编了「他好久没理我」（其实 ${Math.round(idleMin)} 分钟前刚说话）：${body.slice(0, 30)}`);
+        try {
+          const retry = await runner.run(
+            `${prompt}\n\n[纠正] 他 ${Math.round(idleMin)} 分钟前刚说过话，你上一条说成他好久不在的样子了。` +
+              `重说一句：接着他刚才那件事说，或者直接说想他，但别再提「还没回来 / 好久没理我 / 人呢」。`,
+          );
+          body = polish(String(retry.text).trim(), { recent: pickRecent(), maxEmoji: config.emojiMax ?? 2 });
+        } catch (error) {
+          log.warn(`重说失败：${error?.message ?? error}`);
+        }
+        if (!body || looksLikeAbsenceClaim(body)) {
+          log.warn('重说还是编的，这轮先不发');
+          return;
+        }
+      }
       if (!body) return;
 
       // 正常人不是只在同一个软件上找你：偶尔换成抖音私信
