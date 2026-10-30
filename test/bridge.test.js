@@ -490,3 +490,18 @@ test('看图失败时：明确告诉她看不到，不许猜', async () => {
   assert.match(prompts[0], /你这会儿看不到这张图/);
   assert.match(prompts[0], /绝对不许凭上下文猜/);
 });
+
+test('聊天提示里也不许编爸爸说过的话', async () => {
+  const prompts = [];
+  const { bridge } = await setup({
+    config: makeConfig({ channel: 'qq' }),
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '嗯。', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-no-fake-memory' });
+  assert.match(prompts[0], /别编爸爸说过的话/);
+});

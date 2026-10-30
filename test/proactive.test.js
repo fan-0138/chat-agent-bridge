@@ -236,3 +236,51 @@ test('截图失败不影响发消息', async () => {
   await proactive._tick();
   assert.deepEqual(events, [['text', '嗯。']]);
 });
+
+/* ───────── 不许编他说过的话（2026-10-30 20:10 / 23:30 实录） ───────── */
+
+test('「耍小脾气」这条不再诱导编造他的承诺', () => {
+  const seen = new Set();
+  for (let i = 0; i < 500; i += 1) seen.add(chooseIdea({ hour: 21, lastTurnAt: 0 }));
+  for (const idea of seen) {
+    assert.doesNotMatch(idea, /他昨天说了什么/, `不该再有这条：${idea}`);
+  }
+  assert.ok(
+    [...seen].some((idea) => idea.includes('耍个小脾气')),
+    '小脾气这条要留着，只是不许编他的原话',
+  );
+});
+
+test('主动消息的提示里写死「别编他说过的话」', async () => {
+  const prompts = [];
+  const proactive = createProactive({
+    config: {
+      proactiveEnabled: true,
+      proactiveMaxPerDay: 3,
+      proactiveMinGapMin: 90,
+      proactiveAfterIdleMin: 45,
+      proactiveQuietStart: 0,
+      proactiveQuietEnd: 0,
+      proactiveChance: 1,
+      proactiveCommentChance: 0,
+      proactiveQzoneChance: 0,
+      proactiveDouyinChance: 0,
+      allowList: ['123456789'],
+      emojiMax: 2,
+    },
+    log: { info() {}, warn() {}, debug() {} },
+    runner: {
+      async run(p) {
+        prompts.push(p);
+        return { text: '今天机房好热。', durationMs: 5 };
+      },
+    },
+    persona: async () => '',
+    memory: { async load() { return []; }, async append() {} },
+    reply: async () => {},
+    isBusy: () => false,
+    life: null,
+  });
+  await proactive._tick();
+  assert.match(prompts[0], /别编他说过的话/);
+});
