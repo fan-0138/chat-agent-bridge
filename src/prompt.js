@@ -126,7 +126,11 @@ function buildAttachmentSection({ kind, path, evidence, reason }) {
     lines.push(evidence.length > 6_000 ? `${evidence.slice(0, 6_000)}\n…（证据过长已截断）` : evidence);
     lines.push('用法：结合用户的问题使用这份证据。看不清或证据里没有相关内容就直说，不要编。');
   } else {
-    lines.push(`视觉识别不可用${reason ? `（${reason}）` : ''}：你只有文件路径，可以自己用 bash 尝试分析，实在看不到就如实告诉用户。`);
+    lines.push(
+      `视觉识别不可用${reason ? `（${reason}）` : ''}：**你这会儿看不到这张图的内容**。` +
+        '可以自己用 bash 试着读一下；读不出来就必须如实说「图没看到 / 没加载出来」，' +
+        '**绝对不许凭上下文猜图里有什么**——猜错了（比如猜成别的照片）比说没看到更丢人。',
+    );
   }
   return lines.join('\n');
 }

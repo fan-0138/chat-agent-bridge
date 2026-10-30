@@ -467,3 +467,26 @@ test('上一轮超时过：下一轮告诉她实情，别编刷抖音', async ()
   assert.match(prompts[1], /\[系统\] 上一轮你回的时候卡超时了/, prompts[1].slice(-400));
   assert.match(prompts[1], /就直说刚才卡了一下/);
 });
+
+test('看图失败时：明确告诉她看不到，不许猜', async () => {
+  const prompts = [];
+  const { bridge } = await setup({
+    vision: { available: false, reason: '超时', analyze: async () => null },
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '图没加载出来。', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({
+    ...baseMsg,
+    id: 'm-vision-fail-1',
+    type: 'media',
+    kind: 'image',
+    path: '/tmp/x.jpg',
+    text: '',
+  });
+  assert.match(prompts[0], /你这会儿看不到这张图/);
+  assert.match(prompts[0], /绝对不许凭上下文猜/);
+});
