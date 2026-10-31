@@ -81,3 +81,21 @@ test('没配权限模式就不设（用 dsh 自己的默认 workspace-write）',
   const result = await runnerFor(bin).run('跑一下');
   assert.match(result.text, /MODE=\[\]/);
 });
+
+test('换 key 不用重启：每次调用都现取', async () => {
+  const bin = await mockBinary('printf "%s\\n" "$DEEPSEEK_API_KEY"');
+  let current = 'sk-old-key';
+  const runner = createDshRunner({
+    command: bin,
+    profile: 'headless',
+    cwd: process.cwd(),
+    timeoutMs: 5_000,
+    log: silentLog,
+    apiKey: async () => current,
+  });
+  const first = await runner.run('hi');
+  assert.equal(first.text.trim(), 'sk-old-key');
+  current = 'sk-new-key';
+  const second = await runner.run('hi');
+  assert.equal(second.text.trim(), 'sk-new-key', '第二次应该拿到新 key，不用重启');
+});

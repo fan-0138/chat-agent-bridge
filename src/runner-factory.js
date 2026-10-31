@@ -14,7 +14,7 @@ export function createAgentRunners({ config, log, dshCommand, apiKey }) {
   if (backend === 'openai') {
     const runner = createOpenAiRunner({
       baseUrl: config.openaiBaseUrl,
-      apiKey: config.openaiApiKey || apiKey,
+      apiKey: config.openaiApiKey || (typeof apiKey === 'string' ? apiKey : undefined),
       model: config.openaiModel,
       timeoutMs: config.agentTimeoutMs,
       log,

@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { loadQqConfig } from './config-qq.js';
-import { maskKey, resolveApiKey, resolveDshCommand } from './credentials.js';
+import { createApiKeySource, maskKey, resolveApiKey, resolveDshCommand } from './credentials.js';
 import { createDshRunner } from './dsh.js';
 import { createAgentRunners } from './runner-factory.js';
 import { createLogger } from './log.js';
@@ -74,6 +74,8 @@ async function main() {
   const { command: dshCommand, source: dshSource } = resolveDshCommand(process.env);
   const keyInfo = await resolveApiKey();
   const apiKey = keyInfo?.value;
+  // 传给 runner 的是「取 key 的函数」：每次调用都重读，换 key 不用重启
+  const apiKeySource = createApiKeySource();
 
   if (config.problems.length > 0) {
     for (const problem of config.problems) log.warn(`配置问题：${problem}`);
@@ -129,7 +131,7 @@ async function main() {
     log.warn('没有找到 DEEPSEEK_API_KEY，headless 调用模型可能失败。');
   }
 
-  const { runner, chatRunner } = createAgentRunners({ config, log, dshCommand, apiKey });
+  const { runner, chatRunner } = createAgentRunners({ config, log, dshCommand, apiKey: apiKeySource });
 
   const memory = createMemory({
     dir: `${dataDir}/qq/memory`,

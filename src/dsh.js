@@ -101,7 +101,9 @@ export function createDshRunner(options) {
     log.debug(`spawn ${command} --profile ${profile} <${prompt.length} chars>`);
 
     const env = cleanEnv(process.env);
-    if (apiKey) env.DEEPSEEK_API_KEY ??= apiKey;
+    // apiKey 可能是函数：每次 spawn 现取，主人换完 key 不用重启桥接
+    const resolvedApiKey = typeof apiKey === 'function' ? await apiKey() : apiKey;
+    if (resolvedApiKey) env.DEEPSEEK_API_KEY ??= resolvedApiKey;
     // cleanEnv 会把 DSH_* 全过滤掉，所以沙箱档位得在这里显式塞回去。
     // danger-full-access 同时让审批策略变 never（headless 没人能点同意，ask 就等于拒绝）。
     if (options.permissionMode) env.DSH_PERMISSION_MODE = options.permissionMode;

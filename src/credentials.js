@@ -58,6 +58,19 @@ export async function resolveApiKey({ env = process.env, home = homedir() } = {}
   return null;
 }
 
+/**
+ * 每次取 key 都重新读一遍（环境变量优先，其次 credentials.yaml）。
+ *
+ * 以前 key 只在启动时解析一次：主人在桌面版里换了 key，桥接还抱着旧的，
+ * 要重启才好——2026-10-31 就是这么卡的。现在每次 spawn 现取，换完下一条消息就生效。
+ */
+export function createApiKeySource({ env = process.env, home = homedir() } = {}) {
+  return async () => {
+    const resolved = await resolveApiKey({ env, home });
+    return resolved?.value ?? null;
+  };
+}
+
 export function maskKey(value) {
   if (!value) return '(未找到)';
   if (value.length <= 10) return `${value.slice(0, 2)}***`;
