@@ -10,9 +10,9 @@
 
 import { polish } from './decor.js';
 import { formatShare, localDay } from './life.js';
+import { createQzonePoster } from './qzone.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { spawn } from 'node:child_process';
 
 /** 纯函数：给定状态和时间，决定这次 tick 要不要说话（方便单测）。 */
 export function decide({ state, now, config, random = Math.random, quiet = false }) {
@@ -141,6 +141,9 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
   }
   const conversationId = `private_${target}`;
 
+  // 说说：素材/角度/判重都在 qzone.js，这里只管什么时候写
+  const qzone = createQzonePoster({ config, log, runner, persona, voice, life, now });
+
   /** 在刷到的视频下留一句评论（带 @主人，让他收到提醒）。 */
   async function leaveComment({ personaText, share }) {
     try {
@@ -168,41 +171,6 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       log.info(`委托评论区留言：${body.slice(0, 30)}`);
     } catch (error) {
       log.warn(`生成评论失败：${error?.message ?? error}`);
-    }
-  }
-
-  /** 自己发一条 QQ 空间说说（不请示，发完再说）。 */
-  async function postQzone({ personaText }) {
-    try {
-      const voiceText = voice ? (await voice.load()).text : '';
-      const hour = new Date(now()).getHours();
-      const prompt = [
-        personaText ? `[你是谁]\n${personaText}` : '',
-        voiceText,
-        `[此刻] 现在是 ${hour} 点。`,
-        '[任务] 你要发一条 QQ 空间说说。',
-        '要求：20-50 字，像随手发的日常（吃了什么、机房怎么样、刚看到什么、心情），不要 hashtag、不要营销腔、不要 emoji 超过两个；内容要和「现在几点」对得上，别写还没到的时段（上午别写中午吃了什么、中午别写晚上）；只输出说说内容。',
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-      const { text } = await runner.run(prompt);
-      const content = String(text).trim().split('\n')[0].slice(0, 120);
-      if (!content) return;
-
-      const script = resolve(process.cwd(), 'scripts/qq-action.mjs');
-      const child = spawn(process.execPath, [script, '--action', 'send_qzone_msg', '--params', JSON.stringify({ content })], {
-        cwd: process.cwd(),
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let out = '';
-      child.stdout.on('data', (chunk) => (out += chunk.toString('utf8')));
-      child.once('close', (code) => {
-        if (code === 0) log.info(`自己发了条说说：${content.slice(0, 30)}`);
-        else log.warn(`发说说失败（退出码 ${code}）${out.slice(0, 120)}`);
-      });
-    } catch (error) {
-      log.warn(`发说说异常：${error?.message ?? error}`);
     }
   }
 
@@ -317,7 +285,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
 
       // 偶尔自己发条说说，事后才告诉他
       if (Math.random() < (config.proactiveQzoneChance ?? 0.12)) {
-        await postQzone({ personaText });
+        await qzone.post({ history, share });
       }
       const day = localDay(now());
       state.day = day;
