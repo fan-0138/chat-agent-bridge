@@ -77,7 +77,7 @@ export const EDGES = [
 export const WANDER = ['rugL', 'rugC', 'rugR', 'frontC', 'rightF', 'shelfF', 'bedF'];
 
 /** 走路速度：单位是「舞台高度的百分比每秒」（横向按 16:9 折算成实际距离）。 */
-export const WALK_SPEED = 15;
+export const WALK_SPEED = 12;
 
 /** 站得越靠下越大：scale = SCALE.atBottom0 + SCALE.perBottom * bottom。 */
 export const SCALE = { atBottom0: 0.8794, perBottom: -0.01368, min: 0.42, max: 1.05 };

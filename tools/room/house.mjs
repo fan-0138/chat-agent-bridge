@@ -98,7 +98,7 @@ export const EDGES = [
 export const WANDER = ['leftF', 'frontL', 'center', 'rugF', 'rugR', 'rightF', 'bedSide'];
 
 /** 走路速度：娃娃屋地板大、视角平，比 Blender 房间慢一点更像在屋里晃。 */
-export const WALK_SPEED = 12.5;
+export const WALK_SPEED = 9.5;
 
 /** 深度缩放：y=430 时 0.78，y=665 时 1.0（与 dsh-in-home 的 SCENE_DEPTH 对齐）。 */
 export const SCALE = { atBottom0: 1.0964, perBottom: -0.00719, min: 0.74, max: 1.03 };

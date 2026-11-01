@@ -214,7 +214,9 @@
     phone: '/assets/phone.webm',     // 对屏碎碎念（刷抖音）
     sleep: '/assets/sleep.webm',     // 原地小憩沉眠（坐着打盹）
     window: '/assets/window.webm',   // 东张西望（窗边发呆）
-    walk: '/assets/walk.webm',       // 螃蟹走路（移动时用）
+    walk: '/assets/float.webm',      // 原地漂浮踏步（移动时用：正面、不歪，配合起伏最自然）
+    walkCrab: '/assets/walk.webm',   // 螃蟹走路（会整个人歪过去，调试对比用）
+    walkRun: '/assets/run.webm',     // 原地左转奔跑（插件用的那段，调试对比用）
     rubik: '/assets/rubik.webm',     // 原地专心玩魔方（摸鱼）
     think: '/assets/think.webm',     // 深度思考碎碎念
     hum: '/assets/hum.webm',         // 悠闲哼歌
@@ -232,6 +234,8 @@
   const WALK_DEMO = (params.get('walk') || '').split(',').filter(Boolean); // 调试：按顺序走一圈
   const NOWALK = params.has('nowalk'); // 调试：不播走路，直接站过去
   const AT = params.get('at');         // 调试：?at=21.3,6 把她摆到指定点
+  // 调试：?walkclip=float 换一段走路动作（crab=默认螃蟹走路 / float=原地漂浮踏步 / run=原地左转奔跑）
+  const WALK_SRC = params.get('walkclip') ? `/assets/${params.get('walkclip')}.webm` : CLIPS.walk;
 
   const her = document.getElementById('her');
   const video = document.getElementById('herVideo');
@@ -256,13 +260,16 @@
 
   /* ────────── 摆位置：left/bottom 百分比 + 透视缩放 ────────── */
 
-  function pose(x, bottom, dirX = 0) {
+  function pose(x, bottom, dirX = 0, bob = 0, tilt = 0) {
     if (Math.abs(dirX) > 0.3) facing = dirX < 0 ? -1 : 1;
     currentPos = { x, bottom };
     const scale = scaleAt(bottom);
+    const lift = Math.max(0, bob);
     her.style.left = `${x.toFixed(3)}%`;
     her.style.bottom = `${bottom.toFixed(3)}%`;
-    her.style.transform = `translateX(-50%) scale(${scale}) scaleX(${facing < 0 ? -1 : 1})`;
+    her.style.transform =
+      `translateX(-50%) translateY(${(-lift).toFixed(2)}%) rotate(${tilt.toFixed(2)}deg) ` +
+      `scale(${scale}) scaleX(${facing < 0 ? -1 : 1})`;
     // 影子跟着立绘大小：宽约立绘一半、高按基础高度等比缩
     const shadowH = 2.2 * (SPRITE_BASE_HEIGHT / 62);
     shadow.style.left = `${x.toFixed(3)}%`;
@@ -321,9 +328,15 @@
         }
         const t = Math.min(1, (now - start) / ms);
         const p = pointOnPoints(points, total * t);
-        pose(p.x, p.bottom, p.dirX);
-        if (t >= 1) resolve(true);
-        else requestAnimationFrame(step);
+        // 走路的「步态」：两步一个循环，落地时最低、身体跟着轻摆；停下就归零
+        const phase = now / 230;
+        const bob = 1.5 * Math.abs(Math.sin(phase));
+        const tilt = 1.1 * Math.sin(phase);
+        pose(p.x, p.bottom, p.dirX, bob, tilt);
+        if (t >= 1) {
+          pose(p.x, p.bottom, p.dirX, 0, 0);
+          resolve(true);
+        } else requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
     });
@@ -355,7 +368,7 @@
     const myEpoch = epoch;
     const points = planTo(key);
     if (points) {
-      setClip(CLIPS.walk);
+      setClip(WALK_SRC);
       const ok = await walkPoints(points);
       if (!ok || epoch !== myEpoch) return;
       currentNode = key;
@@ -385,7 +398,7 @@
         if (epoch !== myEpoch) return;
         const points = planTo(key);
         if (points) {
-          setClip(CLIPS.walk);
+          setClip(WALK_SRC);
           const ok = await walkPoints(points);
           if (!ok || epoch !== myEpoch) return;
           currentNode = key;
@@ -397,7 +410,7 @@
       if (epoch !== myEpoch) return;
       const back = planTo(scene);
       if (back) {
-        setClip(CLIPS.walk);
+        setClip(WALK_SRC);
         const ok = await walkPoints(back);
         if (!ok || epoch !== myEpoch) return;
         currentNode = scene;
@@ -427,7 +440,7 @@
     const target = scene;
     const points = planTo(target);
     if (points) {
-      setClip(CLIPS.walk);
+      setClip(WALK_SRC);
       const ok = await walkPoints(points);
       if (!ok || epoch !== myEpoch) return;
       currentNode = target;

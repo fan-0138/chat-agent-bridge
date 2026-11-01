@@ -32,6 +32,7 @@ ROOM_PORT=8771 node tools/room/server.mjs   # 换端口
 | `?stroll=1` | 让她每 5 秒起来逛一圈（平时是每 20–45 秒自己逛） |
 | `?nowalk=1` | 不播走路，直接站到目标位置（调站位用） |
 | `?at=19.5,17.5` | 把她钉在指定坐标（x%、bottom%），配合 `?scene=` 调站位 |
+| `?walkclip=float` / `crab` / `run` | 换走路动作对比（默认 float=原地漂浮踏步） |
 | `?emote=dance` / `?emote=sulk` | 预览「被夸 / 被叫机器人账号」的反应 |
 
 ## 房间怎么画出来的（走 Blender MCP）
@@ -133,8 +134,11 @@ cp package/assets/hut-night.webp package/assets/hut-day.webp <repo>/tools/room/a
 - 房间地面拆成落脚点（11 个做事的位置 + 7 个闲逛点），连成一张能走的路网，
   床边只能从「床沿」上下、不会从地毯中间穿床过去
 - 每次换事做，先 `route()` 寻路，再按实际距离算走路时长（横向 16:9 折算成真实距离，15%/秒）
-- 走的时候播 `walk.webm`（螃蟹走路），每帧重算脚下位置、透视缩放和影子；
-  往左走会把立绘水平翻转，朝向跟着方向走
+- 走的时候播 `float.webm`（原地漂浮踏步），每帧重算脚下位置、透视缩放和影子，
+  再加一个「步频」——两步一个循环的上下起伏 + 轻微左右摆；往左走会把立绘水平翻转
+- 为什么不用「螃蟹走路」：那段动画里她会整个人歪向一边，平移起来像在飘；插件用的
+  「原地左转奔跑」也会转圈。对比参数：`?walkclip=crab` / `?walkclip=run`
+- 走路速度：Blender 房间 12、小屋 9.5（单位：舞台高度的百分比每秒），慢一点更像在屋里晃
 - 她忙自己的事时，每隔 20–45 秒会起来逛一圈：地毯边 → 窗下/书架前/床边，
   站一两秒看看，再走回原来的位置继续（`?stroll=1` 可以马上看到）
 - 被夸/被叫机器人账号时会当场停下反应，反应完再走回去
@@ -147,7 +151,8 @@ cp package/assets/hut-night.webp package/assets/hut-day.webp <repo>/tools/room/a
 ## 素材
 
 - `assets/room-bg.png`：Blender 渲的房间底图（1920×1080，仓库不同步，按上面的步骤重新生成）
-- `assets/*.webm`：她的动作，全来自 dsh-pet 里那 106 段（透明背景），用到的 14 段复制在 `assets/`。
+- `assets/*.webm`：她的动作，全来自 dsh-pet 里那 106 段（透明背景），用到的 16 段复制在 `assets/`
+  （走路相关三段：`float.webm` 原地漂浮踏步、`walk.webm` 螃蟹走路、`run.webm` 原地左转奔跑）。
 仓库里只同步代码，不同步 `assets/`（二进制、且能从 dsh-pet 直接拿）：
 
 ```sh
