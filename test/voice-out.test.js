@@ -104,3 +104,18 @@ test('响度归一默认开着，可以用空字符串关掉', () => {
   });
   assert.equal(off.loudnorm, '');
 });
+
+test('情绪参数有默认值，也能被配置覆盖', () => {
+  const voice = createVoiceOut({
+    config: { voiceOutEnabled: true, edgeTtsBin: '/bin/echo' },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(voice.ttsTemperature, 1.4);
+
+  const louder = createVoiceOut({
+    config: { voiceOutEnabled: true, edgeTtsBin: '/bin/echo', ttsTemperature: 1.2, ttsTopK: 20 },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(louder.ttsTemperature, 1.2);
+  assert.equal(louder.ttsTopK, 20);
+});

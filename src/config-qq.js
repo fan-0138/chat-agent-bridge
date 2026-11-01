@@ -68,6 +68,8 @@ const DEFAULTS = {
   ttsRefAudio: '',
   ttsPromptText: '',
   ttsSpeed: 1,
+  ttsTemperature: 1.4,   // 1.0 太平，1.4 起伏更活但还不吞字
+  ttsTopK: 15,
   voiceOutName: 'zh-CN-XiaoyiNeural',
   voiceOutPitch: '+0Hz',
   voiceOutRate: '+5%',
@@ -214,6 +216,8 @@ export function loadQqConfig(env = process.env) {
     ttsRefAudio: env.QQ_TTS_REF?.trim() || DEFAULTS.ttsRefAudio,
     ttsPromptText: env.QQ_TTS_PROMPT_TEXT?.trim() || DEFAULTS.ttsPromptText,
     ttsSpeed: Number(env.QQ_TTS_SPEED?.trim() || DEFAULTS.ttsSpeed) || 1,
+    ttsTemperature: Number(env.QQ_TTS_TEMPERATURE?.trim() || DEFAULTS.ttsTemperature) || DEFAULTS.ttsTemperature,
+    ttsTopK: Number(env.QQ_TTS_TOP_K?.trim() || DEFAULTS.ttsTopK) || DEFAULTS.ttsTopK,
     voiceOutName: env.QQ_VOICE_NAME?.trim() || DEFAULTS.voiceOutName,
     voiceOutPitch: env.QQ_VOICE_PITCH?.trim() || DEFAULTS.voiceOutPitch,
     voiceOutRate: env.QQ_VOICE_RATE?.trim() || DEFAULTS.voiceOutRate,

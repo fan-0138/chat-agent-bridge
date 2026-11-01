@@ -134,6 +134,9 @@ export function createVoiceOut({
   const ttsRefAudio = config.ttsRefAudio || '';
   const ttsPromptText = config.ttsPromptText || '';
   const ttsSpeed = Number(config.ttsSpeed ?? 1) || 1;
+  // 采样温度：1.0 太稳（听着平），1.5 往上容易吞字；1.4 是实测下来起伏和准确度都还行的点
+  const ttsTemperature = Number(config.ttsTemperature ?? 1.4) || 1.4;
+  const ttsTopK = Number(config.ttsTopK ?? 15) || 15;
   // 合成出来的电平普遍偏低（复刻模型 -23 LUFS、edge -22 LUFS），手机外放像蚊子叫。
   // 统一拉到 -16 LUFS / 峰 -1.5 dB，设空字符串可以关掉。
   const loudnorm =
@@ -235,6 +238,8 @@ export function createVoiceOut({
           text_split_method: 'cut5',
           media_type: 'wav',
           speed_factor: ttsSpeed,
+          temperature: ttsTemperature,
+          top_k: ttsTopK,
         }),
         signal: AbortSignal.timeout(timeoutMs),
       }).catch((error) => {
@@ -268,6 +273,8 @@ export function createVoiceOut({
     voiceName: label,
     provider,
     loudnorm,
+    ttsTemperature,
+    ttsTopK,
     canSpeak,
     speak,
     stats() {
