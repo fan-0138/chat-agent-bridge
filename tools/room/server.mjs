@@ -27,6 +27,7 @@ const PORT = Number(process.env.ROOM_PORT || 8770);
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -129,6 +130,8 @@ async function snapshot() {
     activityMinutes: since ? Math.round((now - since) / 60000) : 0,
     scene: frame.scene,
     sleepy: frame.sleepy,
+    bedtime: frame.bedtime,
+    asleep: frame.scene === 'sleep',
     emote: frame.emote,
     meals: {
       today: todayMeals.map((row) => `${row.slot}：${row.dish}`),

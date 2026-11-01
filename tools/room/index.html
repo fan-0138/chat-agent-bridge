@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
 <title>小鲸的房间</title>
 <style>
   :root {
@@ -34,43 +35,47 @@
     box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(120, 150, 220, 0.14);
     background: #0b1220;
   }
-  .room { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; z-index: 1; }
+  .room {
+    position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; z-index: 1;
+    transition: filter 2.2s ease;
+  }
   .vignette {
     position: absolute; inset: 0; z-index: 5; pointer-events: none;
     background: radial-gradient(ellipse at 50% 46%, rgba(4, 6, 12, 0) 52%, rgba(4, 6, 12, .34) 100%);
+    transition: background 2.2s ease;
   }
+  /* 她睡着的时候，房间的灯也暗下来 */
+  .asleep .room { filter: brightness(.74) saturate(.86); }
+  .asleep .vignette { background: radial-gradient(ellipse at 24% 62%, rgba(4, 6, 12, 0) 26%, rgba(4, 6, 12, .5) 100%); }
 
   /* ── 她 ── */
   #her {
     position: absolute;
-    height: 62%;
-    left: 50%; bottom: 18%;
+    height: 62%;               /* 和 walk.mjs 的 SPRITE_BASE_HEIGHT 一致 */
+    left: 50%; bottom: 12%;
     transform-origin: 50% 100%;
-    transform: translateX(-50%) scale(1);
-    transition: left 1.4s cubic-bezier(.4, .1, .2, 1), bottom 1.4s cubic-bezier(.4, .1, .2, 1),
-      transform 1.4s cubic-bezier(.4, .1, .2, 1), filter .8s;
+    transform: translateX(-50%) scale(.7);
     filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.55));
     z-index: 4;
+    will-change: left, bottom, transform;
   }
   #her video { height: 100%; width: auto; display: block; }
-  /* 睡觉那一幕：整段压暗 */
-  #her[data-scene="sleep"] video { filter: brightness(.72) saturate(.85); }
 
-  /* 她脚下那摊影子：跟着走、跟着远近变大变小 */
+  /* 她脚下那摊影子：位置/大小每帧跟着脚走（在 index 脚本里算） */
   #herShadow {
     position: absolute;
     z-index: 3;
-    left: 50%; bottom: 17%;
-    width: 10%; height: 2.6%;
+    left: 50%; bottom: 10%;
+    width: 7%; height: 2.2%;
     transform: translateX(-50%);
     border-radius: 50%;
     background: radial-gradient(ellipse at center, rgba(0, 0, 0, .58), rgba(0, 0, 0, .28) 55%, rgba(0, 0, 0, 0) 72%);
-    transition: left 1.4s cubic-bezier(.4, .1, .2, 1), bottom 1.4s cubic-bezier(.4, .1, .2, 1), width .6s;
+    transition: opacity 1.2s ease;
   }
 
-  /* 睡觉的 zzz */
-  .zzz { position: absolute; left: 62%; top: -6%; font-size: 13px; color: #b9cdff; opacity: 0; transition: opacity .6s; }
-  #her[data-scene="sleep"] .zzz { opacity: 1; top: 56%; left: 66%; animation: floatz 3.2s ease-in-out infinite; }
+  /* 睡觉的 zzz（sprite 里也带，这里补一层轻的） */
+  .zzz { position: absolute; left: 66%; top: 56%; font-size: 13px; color: #b9cdff; opacity: 0; transition: opacity .8s; }
+  #her[data-scene="sleep"] .zzz { opacity: .75; animation: floatz 3.2s ease-in-out infinite; }
   @keyframes floatz { 0% { transform: translate(0, 0); opacity: .2; } 50% { transform: translate(6px, -12px); opacity: .9; } 100% { transform: translate(12px, -24px); opacity: 0; } }
 
   /* ── 气泡 ── */
@@ -84,7 +89,7 @@
     box-shadow: 0 12px 26px rgba(0, 0, 0, 0.4);
     transform: translateX(-50%);
     z-index: 6;
-    transition: left 1.4s cubic-bezier(.4, .1, .2, 1), bottom 1.4s cubic-bezier(.4, .1, .2, 1), opacity .5s, transform .5s;
+    transition: opacity .5s, transform .5s;
   }
   .bubble:empty { opacity: 0; transform: translateX(-50%) translateY(6px); }
   .bubble::after { content: ""; position: absolute; left: 15px; bottom: -8px; border: 8px solid transparent; border-top-color: rgba(232, 240, 255, .95); border-bottom: 0; }
@@ -104,6 +109,7 @@
   .identity .nick { font-size: 11px; color: var(--dim); }
   .identity .doing { margin-top: 6px; font-size: 13px; color: #cfe0ff; }
   .identity .doing b { color: var(--warm); font-weight: 600; }
+  .identity .doing.asleep b { color: #9fc0ff; }
   .identity .since { margin-top: 2px; font-size: 11px; color: var(--dim); }
 
   .status { right: 3%; top: 4%; min-width: 210px; text-align: right; }
@@ -125,23 +131,6 @@
   .recent span { font-size: 10.5px; color: #a8b8dd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .recent b { color: #7f92bb; font-weight: 400; font-family: ui-monospace, monospace; margin-right: 5px; }
   .offline { color: #ff9d9d; }
-
-  /* ── 房间里会动的小东西 ── */
-  .star { animation: twinkle 3.6s ease-in-out infinite; }
-  .bulb { animation: bulbGlow 4.4s ease-in-out infinite; }
-  .code-line { animation: codeFlow 5.5s ease-in-out infinite; }
-  .code-line:nth-child(2) { animation-delay: .5s; }
-  .code-line:nth-child(3) { animation-delay: 1.1s; }
-  .code-line:nth-child(4) { animation-delay: 1.7s; }
-  .code-line:nth-child(5) { animation-delay: 2.3s; }
-  .steam { animation: steamRise 4.2s ease-in-out infinite; }
-  .lamp-glow { animation: lampBreathe 6s ease-in-out infinite; }
-
-  @keyframes twinkle { 0%, 100% { opacity: .25; } 50% { opacity: .95; } }
-  @keyframes bulbGlow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-  @keyframes codeFlow { 0%, 100% { opacity: .25; } 50% { opacity: .9; } }
-  @keyframes steamRise { 0% { opacity: 0; transform: translateY(6px) scale(.8); } 40% { opacity: .55; } 100% { opacity: 0; transform: translateY(-16px) scale(1.25); } }
-  @keyframes lampBreathe { 0%, 100% { opacity: .55; } 50% { opacity: .72; } }
 </style>
 </head>
 <body>
@@ -177,7 +166,19 @@
     </div>
   </div>
 
-<script>
+<script type="module">
+  import {
+    NODES,
+    route,
+    lengthMs,
+    pointsLength,
+    pointOnPoints,
+    scaleAt,
+    feetAt,
+    pickStroll,
+    SPRITE_BASE_HEIGHT,
+  } from './walk.mjs';
+
   const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
   function fmtAgo(min) {
@@ -193,7 +194,7 @@
     work: '/assets/work.webm',       // 写代码
     eat: '/assets/eat.webm',         // 吃白饭
     phone: '/assets/phone.webm',     // 对屏碎碎念（刷抖音）
-    sleep: '/assets/sleep.webm',     // 原地小憩沉眠
+    sleep: '/assets/sleep.webm',     // 原地小憩沉眠（坐着打盹）
     window: '/assets/window.webm',   // 东张西望（窗边发呆）
     walk: '/assets/walk.webm',       // 螃蟹走路（移动时用）
     rubik: '/assets/rubik.webm',     // 原地专心玩魔方（摸鱼）
@@ -205,143 +206,268 @@
     sulk: '/assets/sulk.webm',       // 傲娇生气（被叫机器人账号）
   };
 
-  // 房间是 Blender 渲的透视图：站位由 world_to_camera_view 反算出来
-  // （bottom/scale 跟着真实透视走，她在窗下自然比在地毯上小）
-  const SPOTS = {
-    work:    { x: 37.0, bottom: 20.5, scale: .599, bubble: 51.9 },
-    think:   { x: 37.3, bottom: 21.8, scale: .583, bubble: 52.4 },
-    eat:     { x: 71.5, bottom: 11.7, scale: .720, bubble: 49.0 },
-    phone:   { x: 43.2, bottom: 3.9,  scale: .826, bubble: 46.3 },
-    rubik:   { x: 56.0, bottom: 6.8,  scale: .787, bubble: 47.3 },
-    window:  { x: 65.2, bottom: 20.1, scale: .605, bubble: 54.8 },
-    hum:     { x: 63.3, bottom: 16.0, scale: .661, bubble: 53.7 },
-    sleep:   { x: 21.3, bottom: 6.0,  scale: .798, bubble: 51.0 },
-    yawn:    { x: 51.4, bottom: 14.4, scale: .683, bubble: 49.8 },
-    stretch: { x: 53.9, bottom: 10.9, scale: .731, bubble: 48.7 },
-    idle:    { x: 50.1, bottom: 9.2,  scale: .755, bubble: 48.1 },
-  };
+  // 房间是 Blender 渲的透视图：站位、路点、透视缩放都在 walk.mjs 里
+  const params = new URLSearchParams(location.search);
+  const FORCED_SCENE = params.get('scene');
+  const FORCED_EMOTE = params.get('emote');
+  const FORCE_STROLL = params.has('stroll');
+  const WALK_DEMO = (params.get('walk') || '').split(',').filter(Boolean); // 调试：按顺序走一圈
+  const NOWALK = params.has('nowalk'); // 调试：不播走路，直接站过去
+  const AT = params.get('at');         // 调试：?at=21.3,6 把她摆到指定点
 
-  function bubbleAt(scene) {
-    const spot = SPOTS[scene] ?? SPOTS.idle;
-    return { left: `${spot.x}%`, bottom: `${spot.bubble}%` };
-  }
+  const her = document.getElementById('her');
+  const video = document.getElementById('herVideo');
+  const shadow = document.getElementById('herShadow');
+  const bubbleEl = document.getElementById('bubble');
+  const stageEl = document.querySelector('.stage');
 
-  let currentX = null;
-  let walkTimer = 0;
-  let lastScene = 'idle';
+  let currentNode = 'idle';   // 她正站在哪个落脚点上（走一半被打断会变成 null）
+  let currentPos = { x: NODES.idle.x, bottom: NODES.idle.bottom };
+  let sceneNow = null;        // 正在演的场景
   let emoteKey = null;
   let emoteTimer = 0;
+  let busy = false;           // 正在走/正在演
+  let strolling = false;
+  let sleeping = false;
+  let nextStrollAt = Date.now() + 9000;
+  let epoch = 0;              // 每次取消当前动作 +1；异步流程用它对表
+  let facing = 1;
+  let lastState = null;
+  const demoStart = Date.now();
 
-  function setClip(video, src) {
+  /* ────────── 摆位置：left/bottom 百分比 + 透视缩放 ────────── */
+
+  function pose(x, bottom, dirX = 0) {
+    if (Math.abs(dirX) > 0.3) facing = dirX < 0 ? -1 : 1;
+    currentPos = { x, bottom };
+    const scale = scaleAt(bottom);
+    her.style.left = `${x.toFixed(3)}%`;
+    her.style.bottom = `${bottom.toFixed(3)}%`;
+    her.style.transform = `translateX(-50%) scale(${scale}) scaleX(${facing < 0 ? -1 : 1})`;
+    shadow.style.left = `${x.toFixed(3)}%`;
+    shadow.style.bottom = `${(feetAt(bottom) - 1.1).toFixed(3)}%`;
+    shadow.style.width = `${(9.5 * scale).toFixed(3)}%`;
+    const head = bottom + SPRITE_BASE_HEIGHT * scale * 0.83 + 1.6;
+    bubbleEl.style.left = `${x.toFixed(3)}%`;
+    bubbleEl.style.bottom = `${head.toFixed(3)}%`;
+  }
+
+  function setClip(src) {
     if (!src || video.dataset.src === src) return;
     video.dataset.src = src;
     video.src = src;
     video.play().catch(() => {});
   }
 
-  function placeHer(her, spot, faceLeft) {
-    currentX = spot.x;
-    her.style.left = `${spot.x}%`;
-    her.style.bottom = `${spot.bottom}%`;
-    her.style.transform = `translateX(-50%) scale(${spot.scale}) scaleX(${faceLeft ? -1 : 1})`;
-    const shadow = document.getElementById('herShadow');
-    shadow.style.left = `${spot.x}%`;
-    shadow.style.bottom = `${spot.bottom - 1.1}%`;
-    shadow.style.width = `${10 * spot.scale}%`;
+  function wait(ms, myEpoch) {
+    return new Promise((resolve) => {
+      setTimeout(() => resolve(epoch === myEpoch), ms);
+    });
   }
 
-  /** 走到目标场景的落脚点：走路时播走路动作，到了再换该场景的动作。 */
-  function walkTo(video, her, scene) {
-    const spot = SPOTS[scene] ?? SPOTS.idle;
-    const from = currentX ?? spot.x;
-    const dx = spot.x - from;
-    if (Math.abs(dx) > 2) {
-      setClip(video, CLIPS.walk);
-      her.style.transition =
-        'left 1.4s cubic-bezier(.45,.05,.35,1), bottom 1.4s cubic-bezier(.45,.05,.35,1), transform 1.4s cubic-bezier(.45,.05,.35,1)';
-      const shadow = document.getElementById('herShadow');
-      shadow.style.transition =
-        'left 1.4s cubic-bezier(.45,.05,.35,1), bottom 1.4s cubic-bezier(.45,.05,.35,1), width 1.4s cubic-bezier(.45,.05,.35,1)';
-      clearTimeout(walkTimer);
-      walkTimer = setTimeout(() => {
-        walkTimer = 0;
-        setClip(video, CLIPS[lastScene] ?? CLIPS.idle);
-      }, 1450);
-    } else if (walkTimer === 0) {
-      setClip(video, CLIPS[scene] ?? CLIPS.idle);
-    }
-    placeHer(her, spot, dx < 0);
+  function cancelActivity() {
+    epoch += 1;
+    busy = false;
+    strolling = false;
+    // 可能走了一半被打断：落点未知，交给 planTo 就近接上
+    currentNode = null;
   }
 
-  // 调试：?scene=work 预览某一幕；?walk=work,eat 让她隔 3 秒走一圈；?emote=dance / sulk 预览反应
-  const params = new URLSearchParams(location.search);
-  const FORCED_SCENE = params.get('scene');
-  const FORCED_EMOTE = params.get('emote');
-  const WALK_DEMO = (params.get('walk') || '').split(',').filter(Boolean);
-  const demoStart = Date.now();
+  /* ────────── 走路：沿路点插值，速度按实际距离算 ────────── */
 
-  function paint(state) {
-    const her = document.getElementById('her');
-    const video = document.getElementById('herVideo');
-    const now = Date.now();
+  function walkPoints(points) {
+    const myEpoch = epoch;
+    return new Promise((resolve) => {
+      if (!points || points.length < 2) {
+        resolve(true);
+        return;
+      }
+      if (NOWALK) {
+        const last = points[points.length - 1];
+        pose(last.x, last.bottom);
+        resolve(true);
+        return;
+      }
+      const total = pointsLength(points);
+      const ms = lengthMs(points);
 
-    let scene = FORCED_SCENE || state.scene || 'idle';
-    if (WALK_DEMO.length > 0) {
-      scene = WALK_DEMO[Math.floor((Date.now() - demoStart) / 3000) % WALK_DEMO.length];
+      const start = performance.now();
+      const step = (now) => {
+        if (epoch !== myEpoch) {
+          resolve(false);
+          return;
+        }
+        const t = Math.min(1, (now - start) / ms);
+        const p = pointOnPoints(points, total * t);
+        pose(p.x, p.bottom, p.dirX);
+        if (t >= 1) resolve(true);
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  /** 从她现在的位置出发，走到某个落脚点要经过哪些点。 */
+  function planTo(key) {
+    if (currentNode === key) return null;
+    let startKey = currentNode;
+    if (!startKey) {
+      // 走一半被打断：就近找个落脚点接上
+      let best = null;
+      for (const name of Object.keys(NODES)) {
+        const d = Math.hypot((NODES[name].x - currentPos.x) * (16 / 9), NODES[name].bottom - currentPos.bottom);
+        if (best === null || d < best.d) best = { name, d };
+      }
+      startKey = best.name;
     }
-
-    // 她刚被夸 / 被叫机器人账号：先反应一下，放完再回原场景
-    const emote = FORCED_EMOTE
-      ? { clip: FORCED_EMOTE, key: `forced:${FORCED_EMOTE}`, reason: '', until: Infinity }
-      : state.emote && state.emote.until > now
-        ? state.emote
-        : null;
-
-    if (!emote && emoteKey !== null) {
-      emoteKey = null;
-      clearTimeout(emoteTimer);
-      emoteTimer = 0;
+    const keys = route(startKey, key);
+    const points = keys.map((name) => ({ ...NODES[name] }));
+    const first = points[0];
+    if (!currentNode && (Math.abs(first.x - currentPos.x) > 0.15 || Math.abs(first.bottom - currentPos.bottom) > 0.15)) {
+      points.unshift({ ...currentPos });
     }
+    return points;
+  }
 
-    if (emote && emoteKey !== emote.key) {
-      emoteKey = emote.key;
-      lastScene = scene;
-      clearTimeout(walkTimer);
-      walkTimer = 0;
-      her.dataset.scene = emote.clip;
-      her.style.transition = 'left .45s ease, bottom .45s ease, transform .45s ease';
-      document.getElementById('herShadow').style.transition = 'left .45s ease, bottom .45s ease, width .45s ease';
-      placeHer(her, SPOTS[scene] ?? SPOTS.idle, false);
-      setClip(video, CLIPS[emote.clip]);
-      clearTimeout(emoteTimer);
-      if (emote.until !== Infinity) {
-        emoteTimer = setTimeout(() => {
-          emoteKey = null;
-          emoteTimer = 0;
-          tick();
-        }, Math.max(300, emote.until - Date.now()));
+  async function goAndAct(key, clipSrc, scene) {
+    const myEpoch = epoch;
+    const points = planTo(key);
+    if (points) {
+      setClip(CLIPS.walk);
+      const ok = await walkPoints(points);
+      if (!ok || epoch !== myEpoch) return;
+      currentNode = key;
+    }
+    if (epoch !== myEpoch) return;
+    setClip(clipSrc);
+    her.dataset.scene = scene;
+  }
+
+  /* ────────── 闲逛：每半分钟起来走一圈，再回去干活 ────────── */
+
+  function clipForStop(key) {
+    if (key === 'window') return CLIPS.window;
+    if (key === 'shelfF') return CLIPS.think;
+    if (key === 'bedF') return CLIPS.yawn;
+    return Math.random() < 0.35 ? CLIPS.hum : CLIPS.idle;
+  }
+
+  async function startStroll(scene) {
+    if (strolling) return;
+    const myEpoch = epoch;
+    strolling = true;
+    busy = true;
+    try {
+      const picks = pickStroll(currentNode ?? 'idle');
+      for (const key of picks) {
+        if (epoch !== myEpoch) return;
+        const points = planTo(key);
+        if (points) {
+          setClip(CLIPS.walk);
+          const ok = await walkPoints(points);
+          if (!ok || epoch !== myEpoch) return;
+          currentNode = key;
+        }
+        setClip(clipForStop(key));
+        const alive = await wait(1300 + Math.random() * 2400, myEpoch);
+        if (!alive || epoch !== myEpoch) return;
+      }
+      if (epoch !== myEpoch) return;
+      const back = planTo(scene);
+      if (back) {
+        setClip(CLIPS.walk);
+        const ok = await walkPoints(back);
+        if (!ok || epoch !== myEpoch) return;
+        currentNode = scene;
+      }
+      if (epoch !== myEpoch) return;
+      setClip(CLIPS[scene] ?? CLIPS.idle);
+      her.dataset.scene = scene;
+    } finally {
+      if (epoch === myEpoch) {
+        strolling = false;
+        busy = false;
+        nextStrollAt = Date.now() + 18000 + Math.random() * 26000;
       }
     }
+  }
 
-    const reacting = emoteKey !== null;
-    if (!reacting) {
-      lastScene = scene;
+  /* ────────── 一个场景：走到位置上，再播那一幕 ────────── */
+
+  async function enterScene(scene) {
+    cancelActivity();
+    const myEpoch = epoch;
+    busy = true;
+    sleeping = false;
+    stageEl.classList.remove('asleep');
+    shadow.style.opacity = '';
+
+    const target = scene;
+    const points = planTo(target);
+    if (points) {
+      setClip(CLIPS.walk);
+      const ok = await walkPoints(points);
+      if (!ok || epoch !== myEpoch) return;
+      currentNode = target;
+    }
+    if (epoch !== myEpoch) return;
+
+    if (scene === 'sleep') {
+      setClip(CLIPS.sleep);
+      her.dataset.scene = 'sleep';
+      sleeping = true;
+      stageEl.classList.add('asleep');
+      shadow.style.opacity = '0'; // 她上床了，地上那摊影子就该消失
+    } else {
+      setClip(CLIPS[scene] ?? CLIPS.idle);
       her.dataset.scene = scene;
-      walkTo(video, her, scene);
+    }
+    busy = false;
+    nextStrollAt = Date.now() + (FORCE_STROLL ? 5000 : 18000 + Math.random() * 26000);
+  }
+
+  /* ────────── 反应：被夸跳舞 / 被叫机器人账号生气 ────────── */
+
+  function startEmote(emote) {
+    cancelActivity();
+    const myEpoch = epoch;
+    emoteKey = emote.key;
+    sleeping = false;
+    stageEl.classList.remove('asleep');
+    shadow.style.opacity = '';
+    her.dataset.scene = emote.clip;
+    setClip(CLIPS[emote.clip]);
+    const ms = emote.until === Infinity ? Infinity : Math.max(400, emote.until - Date.now());
+    clearTimeout(emoteTimer);
+    if (ms !== Infinity) {
+      emoteTimer = setTimeout(() => {
+        if (epoch !== myEpoch) return;
+        emoteKey = null;
+        emoteTimer = 0;
+        sceneNow = null; // 下一轮重新回到场景
+        tick();
+      }, ms);
+    }
+  }
+
+  /* ────────── 画面/HUD ────────── */
+
+  function paintHud(state, scene, emote) {
+    const reacting = Boolean(emote);
+    const doing = document.getElementById('doing');
+    if (scene === 'sleep' && !reacting) {
+      doing.className = 'doing asleep';
+      doing.innerHTML = `此刻：<b>睡着了</b>${state.bedtime ? ' · 夜深了，别吵她' : ' · 缩在床上打盹'}`;
+    } else {
+      doing.className = 'doing';
+      doing.innerHTML = `此刻：<b>${esc(state.activity)}</b>`;
     }
 
-    const at = bubbleAt(scene);
-    const bubbleEl = document.getElementById('bubble');
-    bubbleEl.style.left = at.left;
-    bubbleEl.style.bottom = at.bottom;
-    bubbleEl.textContent = reacting && !FORCED_EMOTE ? state.emote.reason : state.latest?.text ?? '';
-
-    const doing = document.getElementById('doing');
-    doing.innerHTML = `此刻：<b>${esc(state.activity)}</b>`;
-
-    document.getElementById('since').textContent = state.activityMinutes
-      ? `已经 ${fmtAgo(state.activityMinutes)}了`
-      : '';
+    document.getElementById('since').textContent = scene === 'sleep'
+      ? '呼…'
+      : state.activityMinutes
+        ? `已经 ${fmtAgo(state.activityMinutes)}了`
+        : '';
 
     document.getElementById('clock').textContent = state.clock;
     document.getElementById('mood').textContent = `心情：${state.mood}`;
@@ -371,6 +497,65 @@
       span.innerHTML = `<b>${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}</b>${esc(item.who)}：${esc(item.text)}`;
       recent.appendChild(span);
     }
+
+    bubbleEl.textContent = scene === 'sleep' && !reacting
+      ? ''
+      : reacting && !FORCED_EMOTE
+        ? state.emote.reason
+        : state.latest?.text ?? '';
+  }
+
+  function paint(state) {
+    lastState = state;
+    const now = Date.now();
+    const demoIdx = WALK_DEMO.length ? Math.floor((now - demoStart) / 4000) % WALK_DEMO.length : -1;
+    const scene = FORCED_SCENE || (demoIdx >= 0 ? WALK_DEMO[demoIdx] : null) || state.scene || 'idle';
+
+    const emote = FORCED_EMOTE
+      ? { clip: FORCED_EMOTE, key: `forced:${FORCED_EMOTE}`, reason: '', until: Infinity }
+      : state.emote && state.emote.until > now
+        ? state.emote
+        : null;
+
+    // 反应（事件）优先于场景（状态）
+    if (emote && emote.key !== emoteKey) {
+      startEmote(emote);
+    } else if (!emote && emoteKey) {
+      emoteKey = null;
+      clearTimeout(emoteTimer);
+      emoteTimer = 0;
+      sceneNow = null;
+    }
+
+    paintHud(state, scene, emote);
+    if (emoteKey) return;
+
+    // 调试：?walk=a,b,c 让她每 4 秒走到下一个地方（录演示用）
+    if (WALK_DEMO.length > 0) {
+      if (!busy && !strolling && sceneNow !== scene) {
+        sceneNow = scene;
+        void enterScene(scene);
+      }
+      return;
+    }
+
+    // 调试：?at=x,bottom 把她钉在指定位置，方便调站位
+    if (AT) {
+      setClip(CLIPS[scene] ?? CLIPS.idle);
+      her.dataset.scene = scene;
+      stageEl.classList.toggle('asleep', scene === 'sleep');
+      return;
+    }
+
+    if (scene !== sceneNow) {
+      sceneNow = scene;
+      void enterScene(scene);
+      return;
+    }
+
+    if (!busy && !strolling && Date.now() >= nextStrollAt && scene !== 'sleep') {
+      void startStroll(scene);
+    }
   }
 
   let offline = false;
@@ -391,8 +576,17 @@
     }
   }
 
+  // 开屏先站在地毯中间，然后自己走到该去的地方
+  if (AT) {
+    const [x, bottom] = AT.split(',').map(Number);
+    currentNode = null;
+    pose(x, bottom);
+  } else {
+    pose(NODES.idle.x, NODES.idle.bottom);
+  }
+
   tick();
-  setInterval(tick, WALK_DEMO.length ? 800 : 3000);
+  setInterval(tick, 3000);
 </script>
 </body>
 </html>

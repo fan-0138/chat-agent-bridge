@@ -96,6 +96,20 @@ export function emoteFor(memory = [], now = Date.now()) {
   return null;
 }
 
+/* ────────────────────────── 睡觉时间 ────────────────────────── */
+
+/** 她真正上床睡觉的时段（晚上 23 点到早上 7 点）。 */
+export const BEDTIME = { from: 23, to: 7 };
+
+/** 电量掉到这个数以下才肯躺下（不然还要再赖一会儿）。 */
+export const SLEEPY_ENERGY = 35;
+
+/** 现在是不是她该上床的时段。 */
+export function inBedtime(hour) {
+  const h = ((Number(hour) % 24) + 24) % 24;
+  return BEDTIME.from > BEDTIME.to ? h >= BEDTIME.from || h < BEDTIME.to : h >= BEDTIME.from && h < BEDTIME.to;
+}
+
 /* ────────────────────────── 合成一刻的画面 ────────────────────────── */
 
 /**
@@ -103,20 +117,27 @@ export function emoteFor(memory = [], now = Date.now()) {
  *
  * @param {{activity?:string, hour?:number, energy?:number,
  *          memory?:Array<{role?:string,text?:string,at?:number}>, now?:number}} input
- * @returns {{scene:string, emote:object|null, sleepy:boolean}}
+ * @returns {{scene:string, emote:object|null, sleepy:boolean, bedtime:boolean}}
  */
 export function frameOf({ activity = '', hour = new Date().getHours(), energy = 60, memory = [], now = Date.now() } = {}) {
   let scene = sceneOf(activity);
+  let bedtime = false;
 
-  const lateNight = hour >= 22 || hour < 7;
-  const dead = energy <= 45;
-  // 深夜还醒着（刷手机/发呆/摸鱼/工作）就别硬撑了，打个哈欠
-  if (lateNight && dead && ['idle', 'phone', 'window', 'rubik', 'work'].includes(scene)) scene = 'yawn';
-  // 早上刚起来、又没别的安排：伸个懒腰
-  else if (hour >= 6 && hour < 9 && scene === 'idle') scene = 'stretch';
+  if (scene !== 'sleep' && inBedtime(hour) && energy <= SLEEPY_ENERGY) {
+    // 夜深了、电量也撑不住了：手上不管在干嘛都先回床上躺下
+    scene = 'sleep';
+    bedtime = true;
+  } else {
+    const lateNight = hour >= 22 || hour < 7;
+    const dead = energy <= 45;
+    // 深夜还醒着（刷手机/发呆/摸鱼/工作）就别硬撑了，打个哈欠
+    if (lateNight && dead && ['idle', 'phone', 'window', 'rubik', 'work'].includes(scene)) scene = 'yawn';
+    // 早上刚起来、又没别的安排：伸个懒腰
+    else if (hour >= 6 && hour < 9 && scene === 'idle') scene = 'stretch';
+  }
 
   // 睡着的时候不反应——她真在睡就让她睡
   const emote = scene === 'sleep' ? null : emoteFor(memory, now);
 
-  return { scene, emote, sleepy: scene === 'yawn' };
+  return { scene, emote, sleepy: scene === 'yawn', bedtime };
 }
