@@ -136,6 +136,9 @@ export const SPRITE_FEET_GAP = 0.084;
 /** #her 的基础高度占舞台的百分比（娃娃屋里的比例参考插件：可见高度约占屋高 26%–33%）。 */
 export const SPRITE_BASE_HEIGHT = 42;
 
+/** 小屋这套 dsh-pet 素材原生朝右（沿用原来的镜像映射，没实测过就走老路）。 */
+export const NATIVE_FACING = 'right';
+
 const floor = createFloor({
   nodes: NODES,
   edges: EDGES,

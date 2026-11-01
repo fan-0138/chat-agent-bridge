@@ -127,6 +127,15 @@ export const SPRITE_FEET_GAP = 0.084;
 /** #her 的基础高度占舞台的百分比。 */
 export const SPRITE_BASE_HEIGHT = 62;
 
+/**
+ * 走路素材原生朝哪边。
+ *
+ * 走路片段是万相图生视频从 idle 那一帧长出来的，她是**朝左看**的（11-01 反馈：
+ * 「从左往右走脸是朝左看」）。所以往右走要水平镜像过去，脸才朝着走的方向。
+ * 换成别的素材（例如正面或朝右的）就把这里改掉。
+ */
+export const NATIVE_FACING = 'left';
+
 const floor = createFloor({
   nodes: NODES,
   edges: EDGES,

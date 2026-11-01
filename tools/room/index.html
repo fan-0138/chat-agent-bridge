@@ -238,6 +238,7 @@
     feetAt,
     pickStroll,
     SPRITE_BASE_HEIGHT,
+    NATIVE_FACING,
     HOTSPOTS,
   } = FLOOR;
 
@@ -329,8 +330,12 @@
 
   /* ────────── 摆位置：left/bottom 百分比 + 透视缩放 ────────── */
 
+  /* 走路素材原生朝哪边：朝左的素材往右走要镜像，脸才朝着走的方向。
+     11-01 反馈「从左往右走脸是朝左看」——原来写死「往左才镜像」，正好反了。 */
+  const NATIVE_SIGN = NATIVE_FACING === 'left' ? -1 : 1;
+
   function pose(x, bottom, dirX = 0, bob = 0, tilt = 0) {
-    if (Math.abs(dirX) > 0.3) facing = dirX < 0 ? -1 : 1;
+    if (Math.abs(dirX) > 0.3) facing = Math.sign(dirX) === NATIVE_SIGN ? 1 : -1;
     currentPos = { x, bottom };
     const scale = scaleAt(bottom);
     const lift = Math.max(0, bob);

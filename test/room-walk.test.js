@@ -8,6 +8,7 @@ import {
   EDGES,
   WANDER,
   WALK_SPEED,
+  NATIVE_FACING,
   route,
   pathLength,
   walkMs,
@@ -163,4 +164,12 @@ test('walk：闲逛挑的点也都能走回场景里', () => {
     assert.ok(route(key, 'idle').length >= 2);
     assert.ok(route('window', key).length >= 2);
   }
+});
+
+/* ── 朝向：素材原生朝哪边（2026-11-01「从左往右走脸朝左」） ── */
+
+test('walk：走路素材声明了原生朝向（页面靠它决定往哪边镜像）', () => {
+  // 页面里 NATIVE_SIGN = NATIVE_FACING === 'left' ? -1 : 1；
+  // 这个导出要是没了，NATIVE_SIGN 会悄悄变回 +1，镜像又反回去。
+  assert.equal(NATIVE_FACING, 'left', 'AI 那条走路片段是朝左看的：往右走要镜像');
 });

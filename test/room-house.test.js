@@ -18,6 +18,7 @@ import {
   pointsLength,
   pickStroll,
   pointOnPoints,
+  NATIVE_FACING,
 } from '../tools/room/house.mjs';
 
 const canWalk = (a, b) => EDGES.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
@@ -121,4 +122,8 @@ test('house：闲逛不会挑床', () => {
 test('house：走路速度和缩放表是合理值', () => {
   assert.ok(WALK_SPEED > 5 && WALK_SPEED < 30);
   assert.ok(SCALE.min < 1 && SCALE.max > 0.9 && SCALE.max <= 1.05);
+});
+
+test('house：小屋素材声明了原生朝向', () => {
+  assert.equal(NATIVE_FACING, 'right', 'dsh-pet 那套素材沿用原来的映射');
 });
