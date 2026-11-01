@@ -134,10 +134,10 @@ cp package/assets/hut-night.webp package/assets/hut-day.webp <repo>/tools/room/a
 - 房间地面拆成落脚点（11 个做事的位置 + 7 个闲逛点），连成一张能走的路网，
   床边只能从「床沿」上下、不会从地毯中间穿床过去
 - 每次换事做，先 `route()` 寻路，再按实际距离算走路时长（横向 16:9 折算成真实距离，15%/秒）
-- 走的时候播 `ai2.webm`（AI 生成的「横走」循环），每帧重算脚下位置、透视缩放和影子，
-  再加一点「步频」起伏；往左走会把立绘水平翻转
+- 走的时候播 `walk-ai.webm`（AI 生成的「横走」循环，60fps、首尾无缝），
+  每帧重算脚下位置、透视缩放和影子；往左走会把立绘水平翻转
 - 这段走路不再是 dsh-pet 里的原地动作，是**用她的立绘 AI 生成**的（见下节「走路片段怎么来的」）；
-  对比参数：`?walkclip=float`（旧的漂浮踏步）/ `ai`（AI 向前走）/ `crab`（旧螃蟹走路）
+  对比参数：`?walkclip=ai30`（30fps 版）/ `float`（旧的漂浮踏步）/ `ai`（AI 向前走）/ `crab`（旧螃蟹走路）
 - 走路速度：Blender 房间 12、小屋 9.5（单位：舞台高度的百分比每秒），慢一点更像在屋里晃
 
 ### 走路片段怎么来的
@@ -148,11 +148,23 @@ dsh-pet 那 106 段全是原地动作，没有真正的走路循环（「螃蟹�
 2. Wan（万相 `wan3.0-video`）图生视频：`first_frame` + 提示词（`tools/room/walkgen/prompt-crab.txt`），
    720P、5 秒、无音频，生成「正面朝向镜头、双脚交替向侧面小步横移」的循环
 3. `tools/room/walkgen/key_and_encode.py`：按帧采样绿幕颜色抠图（软边 + 去绿溢色），
-   把人物缩放到和 dsh-pet 素材一致的比例（640×360，人物约 75% 高），输出 VP9 yuva420p 透明 webm
-4. 换上去就是 `assets/ai2.webm`；`assets/ai.webm` 是「向前走」另一版
+   把人物缩放到和 dsh-pet 素材一致的比例（640×360，人物约 75% 高），输出 30fps 的透明帧
+4. `tools/room/walkgen/rebuild_loop.py`：去掉开头 6 帧静止、取 6–132 帧、首尾 8 帧交叉淡化、
+   再和前后帧做 12% 的时域平滑 —— 得到无缝循环，不再每 5 秒跳一下
+5. `tools/room/walkgen/up60.py`：相邻帧混合插成 60fps（30fps 素材在 60Hz 屏上会顿）
+6. 编码 VP9 yuva420p → `assets/walk-ai.webm`；`assets/walk-ai-30.webm` 是 30fps 对比版，
+   `assets/ai.webm` 是「向前走」另一版
 
 已知问题：AI 生成的人物和 dsh-pet 原画有轻微画风漂移（裙摆/鞋子细节、脸略有差别），
 停下来切回原动作时能看出来一点；要完全一致得走 2D 绑骨或 3D 骨骼那条路。
+
+### 一个坑：video 上的 opacity transition 会把整页拖到 30fps
+
+换动作原本想用 `#her video { transition: opacity .18s }` 交叉淡入淡出，结果 Chromium
+会一直把那块透明 video 当合成层来合成，整页 rAF 从 60fps 掉到 30fps——「走路卡顿」大半是这个。
+现在的做法：切换时临时加 200ms 的 transition，淡完立刻去掉 transition、把退出那块
+`pause()` + `visibility: hidden`，稳态不留合成层。改这块时记得测一下 `requestAnimationFrame`
+的实际间隔（应该 ~16.6ms，不是 ~33ms）。
 - 她忙自己的事时，每隔 20–45 秒会起来逛一圈：地毯边 → 窗下/书架前/床边，
   站一两秒看看，再走回原来的位置继续（`?stroll=1` 可以马上看到）
 - 被夸/被叫机器人账号时会当场停下反应，反应完再走回去

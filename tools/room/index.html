@@ -70,7 +70,14 @@
     z-index: 4;
     will-change: left, bottom, transform;
   }
-  #her video { height: 100%; width: auto; display: block; }
+  #her { display: grid; }
+  #her video {
+    grid-area: 1 / 1;
+    height: 100%; width: auto; display: block;
+    opacity: 0;
+    visibility: hidden;
+  }
+  #her video.is-on { opacity: 1; visibility: visible; }
 
   /* 她脚下那摊影子：位置/大小每帧跟着脚走（在 index 脚本里算） */
   #herShadow {
@@ -152,7 +159,8 @@
     <div id="herShadow"></div>
     <div class="bubble" id="bubble"></div>
     <div id="her" data-scene="idle">
-      <video id="herVideo" muted loop playsinline autoplay preload="auto" poster="/assets/xixi.png"></video>
+      <video id="herVideo" class="is-on" muted loop playsinline autoplay preload="auto" poster="/assets/xixi.png"></video>
+      <video id="herVideoB" muted loop playsinline preload="auto"></video>
       <div class="zzz">z z z</div>
     </div>
 
@@ -214,7 +222,7 @@
     phone: '/assets/phone.webm',     // 对屏碎碎念（刷抖音）
     sleep: '/assets/sleep.webm',     // 原地小憩沉眠（坐着打盹）
     window: '/assets/window.webm',   // 东张西望（窗边发呆）
-    walk: '/assets/ai2.webm',        // AI 生成的横走循环（按她的立绘图生视频、抠绿、转成 640×360）
+    walk: '/assets/walk-ai.webm',    // AI 生成的横走循环（无缝首尾 + 轻度平滑 + 60fps）
     walkAi: '/assets/ai.webm',       // AI 生成的向前走循环（同流程，另一版）
     walkFloat: '/assets/float.webm', // 原地漂浮踏步（dsh-pet 原素材，对比用）
     walkCrab: '/assets/walk.webm',   // 螃蟹走路（会整个人歪过去，对比用）
@@ -237,13 +245,23 @@
   const NOWALK = params.has('nowalk'); // 调试：不播走路，直接站过去
   const AT = params.get('at');         // 调试：?at=21.3,6 把她摆到指定点
   // 调试：?walkclip=float|ai|ai2|crab|run 换一段走路动作对比
-  const WALK_ALIAS = { crab: 'walk', float: 'float', ai: 'ai', ai2: 'ai2', run: 'run' };
+  const WALK_ALIAS = {
+    crab: 'walk',
+    float: 'float',
+    ai: 'ai',
+    ai30: 'walk-ai-30',
+    ai60: 'walk-ai',
+    run: 'run',
+  };
   const WALK_SRC = params.get('walkclip')
     ? `/assets/${WALK_ALIAS[params.get('walkclip')] ?? params.get('walkclip')}.webm`
     : CLIPS.walk;
 
   const her = document.getElementById('her');
-  const video = document.getElementById('herVideo');
+  const videoA = document.getElementById('herVideo');
+  const videoB = document.getElementById('herVideoB');
+  let activeVideo = videoA;
+  let currentClip = '';
   const shadow = document.getElementById('herShadow');
   const bubbleEl = document.getElementById('bubble');
   const roomBg = document.getElementById('roomBg');
@@ -286,11 +304,42 @@
     bubbleEl.style.bottom = `${head.toFixed(3)}%`;
   }
 
-  function setClip(src) {
-    if (!src || video.dataset.src === src) return;
-    video.dataset.src = src;
-    video.src = src;
-    video.play().catch(() => {});
+  /**
+   * 换动作：两块 <video> 轮着来，用 opacity 交叉淡入淡出。
+   * 好处：换片段不用重新 load/decode（一起播着切透明度），也不会从上一帧硬切到下一帧。
+   */
+  function setClip(src, { restart = false } = {}) {
+    if (!src || currentClip === src) return;
+    const next = activeVideo === videoA ? videoB : videoA;
+    const old = activeVideo;
+    if (next.dataset.src !== src) {
+      next.dataset.src = src;
+      next.src = src;
+      next.currentTime = 0;
+    } else if (restart) {
+      try {
+        next.currentTime = 0;
+      } catch {
+        /* 还没加载好就算了 */
+      }
+    }
+    next.play().catch(() => {});
+    next.style.transition = 'opacity .16s linear';
+    next.classList.add('is-on');
+    old.style.transition = 'opacity .16s linear';
+    old.classList.remove('is-on');
+    activeVideo = next;
+    currentClip = src;
+    her.dataset.clip = src;
+    // 淡完就把退出那块彻底收起来 + 去掉 transition：
+    // 视频上常驻 opacity/transition 会让 Chromium 一直合成它，整页被拖到 30fps
+    setTimeout(() => {
+      if (old !== activeVideo) {
+        old.pause();
+        old.style.transition = 'none';
+      }
+      next.style.transition = 'none';
+    }, 200);
   }
 
   function wait(ms, myEpoch) {
@@ -373,7 +422,7 @@
     const myEpoch = epoch;
     const points = planTo(key);
     if (points) {
-      setClip(WALK_SRC);
+      setClip(WALK_SRC, { restart: true });
       const ok = await walkPoints(points);
       if (!ok || epoch !== myEpoch) return;
       currentNode = key;
@@ -403,7 +452,7 @@
         if (epoch !== myEpoch) return;
         const points = planTo(key);
         if (points) {
-          setClip(WALK_SRC);
+          setClip(WALK_SRC, { restart: true });
           const ok = await walkPoints(points);
           if (!ok || epoch !== myEpoch) return;
           currentNode = key;
@@ -415,7 +464,7 @@
       if (epoch !== myEpoch) return;
       const back = planTo(scene);
       if (back) {
-        setClip(WALK_SRC);
+        setClip(WALK_SRC, { restart: true });
         const ok = await walkPoints(back);
         if (!ok || epoch !== myEpoch) return;
         currentNode = scene;
@@ -445,7 +494,7 @@
     const target = scene;
     const points = planTo(target);
     if (points) {
-      setClip(WALK_SRC);
+      setClip(WALK_SRC, { restart: true });
       const ok = await walkPoints(points);
       if (!ok || epoch !== myEpoch) return;
       currentNode = target;
@@ -624,6 +673,15 @@
       doing.textContent = `连不上房间服务（${error.message}）`;
     }
   }
+
+  // 开屏：A 播 idle，B 提前把走路片段 load 好，第一次走就不用等解码
+  videoA.src = CLIPS.idle;
+  videoA.dataset.src = CLIPS.idle;
+  videoA.play().catch(() => {});
+  currentClip = CLIPS.idle;
+  videoB.src = WALK_SRC;
+  videoB.dataset.src = WALK_SRC;
+  videoB.style.visibility = 'hidden';
 
   // 小屋版：换舞台比例、立绘大小、底图和署名
   if (HOUSE) {
