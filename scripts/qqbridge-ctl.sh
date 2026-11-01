@@ -23,6 +23,8 @@ LA="$HOME/Library/LaunchAgents"
 LABEL=local.chat-agent-bridge.qqbridge
 REMIND_LABEL=local.chat-agent-bridge.remind
 NETWATCH_LABEL=local.chat-agent-bridge.netwatch
+ROOM_LABEL=local.chat-agent-bridge.room
+ROOM_PORT=${ROOM_PORT:-8770}
 PLIST="$LA/$LABEL.plist"
 PIDFILE=logs/qq-bridge.pid
 CAFFFILE=logs/qq-caffeinate.pid
@@ -36,13 +38,17 @@ sup_pid()  { ps -axo pid=,args= | awk '$2=="/bin/sh" && $3 ~ /supervise-qq\.sh$/
 remind_pid() { ps -axo pid=,args= | awk '$2=="node" && /qq-remind\.mjs --daemon/ {print $1; exit}'; }
 remind_sup_pid() { ps -axo pid=,args= | awk '$2=="/bin/sh" && $3 ~ /supervise-remind\.sh$/ {print $1; exit}'; }
 watch_pid()  { ps -axo pid=,args= | awk '$2=="/bin/sh" && $3 ~ /net-watch\.sh$/ {print $1; exit}'; }
+# 按端口认房间进程，别把调试用的另一个端口认成它
+room_pid()   { lsof -nP -tiTCP:"$ROOM_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
 
 running() { [ -n "$(node_pid)" ]; }
 not_running() { ! running; }
 remind_running() { [ -n "$(remind_pid)" ]; }
 watch_running() { [ -n "$(watch_pid)" ]; }
+room_running() { [ -n "$(room_pid)" ]; }
 not_remind_running() { ! remind_running; }
 not_watch_running() { ! watch_running; }
+not_room_running() { ! room_running; }
 
 loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
 job_pid() { launchctl print "$DOMAIN/$1" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3; exit}'; }
@@ -156,6 +162,44 @@ start_watch() {
   log "网络看门狗已启动（脱钩方式）。"
 }
 
+start_room() {
+  if room_running; then
+    log "小鲸的房间已经在跑：http://127.0.0.1:$ROOM_PORT"
+    return 0
+  fi
+  if [ -f "$LA/$ROOM_LABEL.plist" ]; then
+    if start_one "$ROOM_LABEL" && wait_until room_running 20; then
+      echo "$(room_pid)" > logs/room.pid
+      log "小鲸的房间已启动（launchd 托管）：http://127.0.0.1:$ROOM_PORT"
+      return 0
+    fi
+    log "launchd 20 秒内没拉起房间服务（大概率是 TCC 不让后台任务读 ~/Documents），改用脱钩方式。"
+    launchctl bootout "$DOMAIN/$ROOM_LABEL" >/dev/null 2>&1
+  fi
+  set -m
+  nohup node tools/room/server.mjs >> logs/room.log 2>&1 &
+  if wait_until room_running 10; then
+    echo "$(room_pid)" > logs/room.pid
+    log "小鲸的房间已启动（脱钩方式，重启电脑后要再起一次）：http://127.0.0.1:$ROOM_PORT"
+    return 0
+  fi
+  log "房间没起来，看 logs/room.log"
+  return 1
+}
+
+stop_room() {
+  _did=0
+  stop_one "$ROOM_LABEL" && _did=1
+  _p=$(room_pid)
+  if [ -n "$_p" ]; then
+    kill -TERM "$_p" 2>/dev/null
+    wait_until not_room_running 10
+    _did=1
+  fi
+  rm -f logs/room.pid
+  [ "$_did" = "1" ] && log "小鲸的房间已停止。" || log "小鲸的房间本来就没在跑。"
+}
+
 stop_bridge() {
   _did=0
   if loaded "$LABEL"; then
@@ -208,14 +252,25 @@ status() {
   if remind_running; then log "  运行中：$(remind_pid)"; else log "  没在跑"; fi
   log "── 网络看门狗 ──"
   if watch_running; then log "  运行中：$(watch_pid)"; else log "  没在跑"; fi
+  log "── 小鲸的房间 ──"
+  if room_running; then
+    log "  运行中：http://127.0.0.1:$ROOM_PORT（node $(room_pid)）"
+    if loaded "$ROOM_LABEL"; then
+      log "  ↳ launchd 托管：开机就在"
+    else
+      log "  ↳ 脱钩方式（重启电脑后要再起一次）"
+    fi
+  else
+    log "  没在跑"
+  fi
 }
 
 case "${1:-status}" in
-  start)     start_bridge ;;
-  stop)      stop_bridge ;;
-  restart)   stop_bridge; sleep 1; start_bridge ;;
+  start)     start_bridge; start_room ;;
+  stop)      stop_bridge; stop_room ;;
+  restart)   stop_bridge; stop_room; sleep 1; start_bridge; start_room ;;
   status)    status ;;
-  start-all) start_bridge; start_remind; start_watch ;;
+  start-all) start_bridge; start_remind; start_watch; start_room ;;
   stop-all)
     stop_bridge
     _stopped_remind=0
@@ -233,9 +288,10 @@ case "${1:-status}" in
     wait_until not_watch_running 20
     [ "$_stopped_watch" = "1" ] && log "网络看门狗已停止。"
     rm -f logs/net-watch.pid
+    stop_room
     ;;
   *)
-    log "用法：$0 {start|stop|restart|status|start-all|stop-all}"
+    log "用法：$0 {start|stop|restart|status|start-all|stop-all}（start/stop 会把小鲸的房间一起带上）"
     exit 2
     ;;
 esac

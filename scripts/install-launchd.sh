@@ -22,6 +22,9 @@ DOMAIN="gui/$UID_"
 BRIDGE_LABEL=local.chat-agent-bridge.qqbridge
 REMIND_LABEL=local.chat-agent-bridge.remind
 NETWATCH_LABEL=local.chat-agent-bridge.netwatch
+ROOM_LABEL=local.chat-agent-bridge.room
+ROOM_PORT=${ROOM_PORT:-8770}
+NODE_BIN=$(command -v node || echo /opt/homebrew/bin/node)
 
 PATH_ENV=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
@@ -123,17 +126,97 @@ install_one() {
   fi
 }
 
+# 房间服务是 node 常驻（不是 shell 脚本），单独写一份 plist
+write_room_plist() {
+  _file="$LA/$ROOM_LABEL.plist"
+  cat > "$_file" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$ROOM_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$NODE_BIN</string>
+        <string>$ROOT/tools/room/server.mjs</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$ROOT</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>StandardOutPath</key>
+    <string>$ROOT/logs/room.log</string>
+    <key>StandardErrorPath</key>
+    <string>$ROOT/logs/room.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>$PATH_ENV</string>
+        <key>LANG</key>
+        <string>zh_CN.UTF-8</string>
+        <key>ROOM_PORT</key>
+        <string>$ROOM_PORT</string>
+    </dict>
+</dict>
+</plist>
+PLIST
+  say "  写好 $_file"
+}
+
+install_room() {
+  bootout_if_loaded "$ROOM_LABEL"
+  write_room_plist
+  if launchctl bootstrap "$DOMAIN" "$LA/$ROOM_LABEL.plist" >/dev/null 2>&1; then
+    say "  已启动 $ROOM_LABEL（房间：http://127.0.0.1:$ROOM_PORT）"
+  else
+    say "  ⚠️ $ROOM_LABEL 登记失败，手动看一下：launchctl bootstrap $DOMAIN $LA/$ROOM_LABEL.plist"
+  fi
+}
+
 if [ "${1:-}" = "--uninstall" ]; then
   say "卸载 launchd 任务（日志、数据、.env.qq 都不动）："
-  for _l in "$BRIDGE_LABEL" "$REMIND_LABEL" "$NETWATCH_LABEL"; do
+  for _l in "$BRIDGE_LABEL" "$REMIND_LABEL" "$NETWATCH_LABEL" "$ROOM_LABEL"; do
     if loaded "$_l"; then
       launchctl bootout "$DOMAIN/$_l" >/dev/null 2>&1 && say "  已停止 $_l"
     fi
     rm -f "$LA/$_l.plist" && say "  已删除 $LA/$_l.plist"
   done
-  rm -f logs/qq-bridge.pid logs/qq-caffeinate.pid logs/net-watch.pid logs/qq-remind.pid
+  _room_pid=$(ps -axo pid=,args= | awk '$2=="node" && /tools\/room\/server\.mjs/ {print $1; exit}')
+  [ -n "$_room_pid" ] && kill -TERM "$_room_pid" 2>/dev/null
+  rm -f logs/qq-bridge.pid logs/qq-caffeinate.pid logs/net-watch.pid logs/qq-remind.pid logs/room.pid
   say ""
   say "她要还在跑，把上面几个进程收一下：pkill -f src/index-qq.js"
+  exit 0
+fi
+
+if [ "${1:-}" = "--room" ]; then
+  say "只装房间服务（不动正在跑的 QQ 桥接）："
+  if [ "${2:-}" != "--force" ] && ! tcc_can_read; then
+    say "✗ macOS 不让 launchd 起的后台任务读 ~/Documents，房间的数据就在那下面，起了也是每 10 秒失败一次。"
+    say "  授权一次就永久生效：系统设置 → 隐私与安全性 → 完全磁盘访问权限 → 点 + → ⌘⇧G 输入 /bin/sh → 打开开关，再跑一次。"
+    say "  不想授权就先手动跑：./scripts/qqbridge-ctl.sh start（脱钩方式，重启电脑后要再起一次）"
+    exit 1
+  fi
+  mkdir -p logs
+  install_room
+  sleep 2
+  _pid=$(launchctl print "$DOMAIN/$ROOM_LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3; exit}')
+  if [ -n "$_pid" ]; then
+    say "  房间 pid=$_pid  打开 http://127.0.0.1:$ROOM_PORT"
+  else
+    say "  没起来，看 logs/room.log"
+  fi
   exit 0
 fi
 
@@ -168,6 +251,7 @@ say "安装 launchd 任务（父进程变成 launchd，跟 DSH / 终端脱钩）
 install_one "$BRIDGE_LABEL"  scripts/qqbridge-run.sh     qq-bridge.log
 install_one "$REMIND_LABEL"  scripts/supervise-remind.sh qq-remind.log
 install_one "$NETWATCH_LABEL" scripts/net-watch.sh       net-watch.log
+install_room
 
 sleep 6
 say ""
@@ -181,6 +265,8 @@ for _l in "$BRIDGE_LABEL" "$REMIND_LABEL" "$NETWATCH_LABEL"; do
     say "  $_l  未在运行"
   fi
 done
+_roompid=$(launchctl print "$DOMAIN/$ROOM_LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3; exit}')
+[ -n "$_roompid" ] && say "  $ROOM_LABEL  pid=$_roompid  房间 http://127.0.0.1:$ROOM_PORT"
 
 if pgrep -f "src/index-qq.js" >/dev/null 2>&1; then
   pgrep -f "src/index-qq.js" | head -1 > logs/qq-bridge.pid
@@ -188,5 +274,5 @@ fi
 
 say ""
 say "以后开关用：./scripts/qqbridge-ctl.sh {start|stop|restart|status|stop-all}"
-say "日志：logs/qq-bridge.log / logs/qq-remind.log / logs/net-watch.log"
+say "日志：logs/qq-bridge.log / logs/qq-remind.log / logs/net-watch.log / logs/room.log"
 say "现在关掉 DSH 试试，她不会掉线。"

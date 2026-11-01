@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>小鲸的房间</title>
+<style>
+  :root {
+    --ink: #e8eeff;
+    --dim: #8fa0c8;
+    --accent: #6ea8ff;
+    --warm: #ffcf8a;
+    --panel: rgba(12, 18, 34, 0.72);
+    --line: rgba(140, 170, 255, 0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(circle at 70% 10%, #16233d 0%, #070b15 62%, #05070d 100%);
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+
+  /* ── 整个画面 ── */
+  .stage {
+    position: relative;
+    width: min(96vw, calc(96vh * 16 / 9));
+    aspect-ratio: 16 / 9;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(120, 150, 220, 0.14);
+    background: linear-gradient(180deg, #0d1526 0%, #0b1220 58%, #070a12 100%);
+  }
+
+  /* 墙上的网格 / 光斑 */
+  .wall {
+    position: absolute; inset: 0 0 26% 0;
+    background-image:
+      radial-gradient(circle at 78% 42%, rgba(110, 168, 255, 0.16), transparent 42%),
+      linear-gradient(180deg, rgba(30, 45, 78, 0.5), transparent 70%),
+      repeating-linear-gradient(90deg, rgba(130, 165, 235, 0.045) 0 1px, transparent 1px 64px),
+      repeating-linear-gradient(0deg, rgba(130, 165, 235, 0.045) 0 1px, transparent 1px 64px);
+  }
+
+  /* 地板 */
+  .floor {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 26%;
+    background:
+      linear-gradient(180deg, #0a1120 0%, #060910 100%),
+      repeating-linear-gradient(90deg, rgba(120, 155, 225, 0.05) 0 2px, transparent 2px 120px);
+    box-shadow: inset 0 14px 30px rgba(0, 0, 0, 0.6);
+  }
+  .floor::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(110, 168, 255, 0.1), transparent 60%);
+  }
+
+  /* ── 窗 ── */
+  .window {
+    position: absolute; right: 7%; top: 12%; width: 22%; height: 44%;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #101a33 0%, #0b1426 100%);
+    box-shadow: inset 0 0 0 6px #1b2740, inset 0 0 40px rgba(120, 170, 255, 0.25), 0 10px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  .window .sky {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 72% 26%, rgba(255, 236, 200, 0.9) 0 8px, rgba(255, 236, 200, 0.16) 9px 30px, transparent 34px),
+      radial-gradient(circle at 30% 66%, rgba(130, 190, 255, 0.35), transparent 50%),
+      linear-gradient(180deg, #0a1630, #0c1c38 60%, #0a1324);
+  }
+  .window .star { position: absolute; width: 2px; height: 2px; background: #cfe0ff; border-radius: 50%; opacity: .8; }
+  .window .bar { position: absolute; left: 50%; top: 0; bottom: 0; width: 6px; margin-left: -3px; background: #1b2740; }
+  .window .moon { position: absolute; right: 26%; top: 20%; width: 22px; height: 22px; border-radius: 50%; background: #ffeec9; box-shadow: 0 0 26px rgba(255, 236, 200, 0.7); }
+
+  /* ── 机柜（她的窝） ── */
+  .rack {
+    position: absolute; left: 6%; top: 20%; width: 15%; height: 62%;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #131b2c, #0b111d);
+    box-shadow: inset 0 0 0 2px #223149, 0 18px 40px rgba(0, 0, 0, 0.55);
+    padding: 8px 8px 10px;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .rack .unit {
+    flex: 1; border-radius: 5px;
+    background: linear-gradient(180deg, #172033, #101827);
+    box-shadow: inset 0 0 0 1px rgba(90, 130, 200, 0.16);
+    display: flex; align-items: center; gap: 5px; padding: 0 7px;
+  }
+  .rack .led { width: 5px; height: 5px; border-radius: 50%; background: #3f7dff; box-shadow: 0 0 8px #3f7dff; animation: blink 2.6s infinite; }
+  .rack .led:nth-child(2) { background: #4bd8a5; box-shadow: 0 0 8px #4bd8a5; animation-delay: .7s; }
+  .rack .led:nth-child(3) { background: #ffcf6b; box-shadow: 0 0 8px #ffcf6b; animation-delay: 1.4s; }
+  .rack .slit { flex: 1; height: 2px; background: rgba(120, 160, 230, 0.14); border-radius: 2px; }
+  @keyframes blink { 0%, 42% { opacity: 1; } 50%, 92% { opacity: .25; } 100% { opacity: 1; } }
+
+  /* ── 桌子 + 显示器 ── */
+  .desk {
+    position: absolute; left: 29%; bottom: 22%; width: 34%; height: 5.5%;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #2a3550, #1a2338);
+    box-shadow: 0 16px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(160, 190, 250, 0.25);
+  }
+  .desk .leg { position: absolute; bottom: -64px; width: 8px; height: 64px; background: linear-gradient(180deg, #1b2337, #0d1220); border-radius: 4px; }
+  .desk .leg.l { left: 8%; } .desk .leg.r { right: 8%; }
+  .monitor {
+    position: absolute; left: 34%; bottom: 27%; width: 17%; height: 26%;
+    border-radius: 8px; background: #0a1120;
+    box-shadow: inset 0 0 0 3px #22304a, 0 0 46px rgba(90, 150, 255, 0.22);
+    overflow: hidden;
+  }
+  .monitor .screen {
+    position: absolute; inset: 7px; border-radius: 4px;
+    background: linear-gradient(180deg, #0d1c33, #0a1526);
+    padding: 8px; display: flex; flex-direction: column; gap: 5px;
+  }
+  .monitor .code { height: 4px; border-radius: 2px; background: rgba(110, 200, 255, 0.55); }
+  .monitor .code:nth-child(2) { width: 72%; background: rgba(140, 220, 180, 0.5); }
+  .monitor .code:nth-child(3) { width: 88%; background: rgba(255, 210, 130, 0.45); }
+  .monitor .code:nth-child(4) { width: 54%; }
+  .monitor .code:nth-child(5) { width: 66%; background: rgba(160, 140, 255, 0.45); }
+  .monitor .stand { position: absolute; left: 50%; bottom: -34px; width: 10px; height: 34px; margin-left: -5px; background: #1a2338; }
+  .mug { position: absolute; left: 47%; bottom: 27.5%; width: 18px; height: 24px; border-radius: 3px 3px 6px 6px; background: linear-gradient(180deg, #e6ecff, #b9c8e8); box-shadow: 0 0 14px rgba(255, 220, 160, 0.25); }
+  .mug::after { content: ""; position: absolute; right: -8px; top: 6px; width: 8px; height: 10px; border: 2.5px solid #cfd9f2; border-left: none; border-radius: 0 6px 6px 0; }
+  .steam { position: absolute; left: 48%; bottom: 33%; width: 6px; height: 20px; border-radius: 50%; background: rgba(200, 220, 255, 0.18); filter: blur(3px); animation: rise 3.6s ease-in-out infinite; }
+  @keyframes rise { 0% { opacity: 0; transform: translateY(6px) scale(.8); } 40% { opacity: .8; } 100% { opacity: 0; transform: translateY(-18px) scale(1.2); } }
+
+  /* ── 饭桌 + 碗 ── */
+  .table {
+    position: absolute; right: 24%; bottom: 21%; width: 15%; height: 4%;
+    border-radius: 6px; background: linear-gradient(180deg, #4a4034, #2a231b);
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.5);
+  }
+  .bowl {
+    position: absolute; right: 30%; bottom: 22.6%; width: 46px; height: 22px;
+    border-radius: 0 0 22px 22px;
+    background: linear-gradient(180deg, #f4f7ff, #cfd9f0);
+    box-shadow: inset 0 -4px 8px rgba(120, 140, 190, 0.5);
+  }
+  .bowl::before { content: ""; position: absolute; left: 3px; right: 3px; top: -5px; height: 10px; border-radius: 50%; background: #fffdf6; box-shadow: inset 0 3px 5px rgba(200, 190, 160, 0.6); }
+  .bowl .rice { position: absolute; left: 8px; right: 8px; top: -3px; height: 8px; border-radius: 50% 50% 40% 40%; background: #f7f2e4; }
+
+  /* ── 地毯 / 小窝 ── */
+  .rug {
+    position: absolute; left: 33%; bottom: 6%; width: 32%; height: 13%;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at 50% 40%, rgba(54, 82, 140, 0.55), rgba(20, 30, 52, 0.2) 70%, transparent 72%);
+    filter: blur(.4px);
+  }
+  .sleepspot {
+    position: absolute; left: 8%; bottom: 14%; width: 19%; height: 12%;
+    border-radius: 60% 60% 40% 40%;
+    background: radial-gradient(ellipse at 50% 40%, rgba(40, 62, 110, 0.75), rgba(12, 18, 32, 0.4) 75%);
+    box-shadow: inset 0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+
+  /* ── 她 ── */
+  #her {
+    position: absolute;
+    height: 62%;
+    left: 50%; bottom: 14%;
+    transform-origin: 50% 100%;
+    transform: translateX(-50%) translateY(0) scale(1);
+    transition: left 1.6s cubic-bezier(.4, .1, .2, 1), bottom 1.6s cubic-bezier(.4, .1, .2, 1), transform 1.6s cubic-bezier(.4, .1, .2, 1), filter .8s;
+    filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.55));
+    z-index: 4;
+  }
+  #her video { height: 100%; width: auto; display: block; }
+  @keyframes bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+  /* 睡觉那一幕：整段压暗 */
+  #her[data-scene="sleep"] video { filter: brightness(.72) saturate(.85); }
+
+  /* 她的位置由 JS 逐帧写在 style 上（这样换动作时能“走”过去） */
+  #her.walking { animation: none; }
+
+  /* 窗边那一幕：窗外光打在她身上 */
+  #her[data-scene="window"]::after {
+    content: ""; position: absolute; inset: -8% -14%; border-radius: 50%;
+    background: radial-gradient(circle at 60% 30%, rgba(255, 236, 200, 0.22), transparent 65%);
+    pointer-events: none;
+  }
+
+  /* 睡觉的 zzz */
+  .zzz { position: absolute; left: 62%; top: -6%; font-size: 13px; color: #b9cdff; opacity: 0; transition: opacity .6s; }
+  #her[data-scene="sleep"] .zzz { opacity: 1; animation: floatz 3.2s ease-in-out infinite; }
+  @keyframes floatz { 0% { transform: translate(0, 0); opacity: .2; } 50% { transform: translate(6px, -12px); opacity: .9; } 100% { transform: translate(12px, -24px); opacity: 0; } }
+
+  /* ── 气泡 ── */
+  .bubble {
+    position: absolute; left: 50%; bottom: 64%;
+    width: max-content; max-width: min(30vw, 380px);
+    padding: 10px 14px;
+    border-radius: 14px 14px 14px 4px;
+    background: rgba(232, 240, 255, 0.95);
+    color: #16213a; font-size: 13px; line-height: 1.45;
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.4);
+    transform: translateX(-50%);
+    transition: opacity .5s, transform .5s;
+    z-index: 6;
+    transition: left 1.4s cubic-bezier(.4, .1, .2, 1), bottom 1.4s cubic-bezier(.4, .1, .2, 1), opacity .5s, transform .5s;
+  }
+  .bubble:empty { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  .bubble::after { content: ""; position: absolute; left: 15px; bottom: -8px; border: 8px solid transparent; border-top-color: rgba(232, 240, 255, .95); border-bottom: 0; }
+
+  /* ── HUD ── */
+  .hud { position: absolute; inset: 0; pointer-events: none; z-index: 8; }
+  .card {
+    position: absolute;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    backdrop-filter: blur(10px);
+    padding: 12px 14px;
+  }
+  .identity { left: 3%; top: 4%; min-width: 240px; }
+  .identity .name { display: flex; align-items: baseline; gap: 8px; font-size: 17px; font-weight: 600; letter-spacing: .5px; }
+  .identity .nick { font-size: 11px; color: var(--dim); }
+  .identity .doing { margin-top: 6px; font-size: 13px; color: #cfe0ff; }
+  .identity .doing b { color: var(--warm); font-weight: 600; }
+  .identity .since { margin-top: 2px; font-size: 11px; color: var(--dim); }
+
+  .status { right: 3%; top: 4%; min-width: 210px; text-align: right; }
+  .status .clock { font: 600 22px/1 ui-monospace, SFMono-Regular, monospace; letter-spacing: 1px; }
+  .status .mood { margin-top: 6px; font-size: 12px; color: #cbd8f5; }
+  .bar { margin-top: 10px; height: 6px; border-radius: 6px; background: rgba(120, 160, 235, 0.16); overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #4f8bff, #7ee0c0); transition: width 1s; }
+  .bar-label { margin-top: 4px; font-size: 10px; color: var(--dim); letter-spacing: .8px; }
+
+  .meals { left: 3%; bottom: 4%; min-width: 230px; }
+  .meals .title { font-size: 11px; letter-spacing: 1px; color: var(--dim); }
+  .meals .row { margin-top: 6px; font-size: 12px; color: #dbe6ff; }
+  .meals .bowls { display: flex; gap: 6px; margin-top: 8px; }
+  .meals .b { width: 16px; height: 10px; border-radius: 0 0 10px 10px; background: #dfe8ff; opacity: .9; }
+  .meals .b.empty { background: rgba(140, 170, 235, 0.18); }
+
+  .feed { right: 2.5%; bottom: 3%; width: 25%; max-height: 21%; overflow: hidden; }
+  .feed .title { font-size: 11px; letter-spacing: 1px; color: var(--dim); margin-bottom: 6px; }
+  .feed ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .feed li { font-size: 11.5px; color: #c9d6f4; display: flex; gap: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .feed li time { color: #7f92bb; font-family: ui-monospace, monospace; flex: none; }
+  .feed li span { overflow: hidden; text-overflow: ellipsis; }
+  .offline { color: #ff9d9d; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="wall"></div>
+    <div class="window">
+      <div class="sky"></div>
+      <div class="moon"></div>
+      <div class="star" style="left:18%; top:30%"></div>
+      <div class="star" style="left:36%; top:56%"></div>
+      <div class="star" style="left:62%; top:38%"></div>
+      <div class="star" style="left:80%; top:64%"></div>
+      <div class="bar"></div>
+    </div>
+    <div class="rack">
+      <div class="unit"><span class="led"></span><span class="slit"></span></div>
+      <div class="unit"><span class="led"></span><span class="slit"></span></div>
+      <div class="unit"><span class="led"></span><span class="slit"></span></div>
+      <div class="unit"><span class="led"></span><span class="slit"></span></div>
+      <div class="unit"><span class="led"></span><span class="slit"></span></div>
+    </div>
+    <div class="sleepspot"></div>
+    <div class="desk">
+      <div class="leg l"></div><div class="leg r"></div>
+    </div>
+    <div class="monitor">
+      <div class="screen"><i class="code"></i><i class="code"></i><i class="code"></i><i class="code"></i><i class="code"></i></div>
+      <div class="stand"></div>
+    </div>
+    <div class="mug"></div>
+    <div class="steam"></div>
+    <div class="table"></div>
+    <div class="bowl"><i class="rice"></i></div>
+    <div class="rug"></div>
+    <div class="floor"></div>
+
+    <div class="bubble" id="bubble"></div>
+    <div id="her" data-scene="idle">
+      <video id="herVideo" muted loop playsinline autoplay preload="auto" poster="/assets/xixi.png"></video>
+      <div class="zzz">z z z</div>
+    </div>
+
+    <div class="hud">
+      <div class="card identity">
+        <div class="name">小鲸 <span class="nick">机器人账号 · 第七机房 · 靠窗第二个机柜</span></div>
+        <div class="doing" id="doing">正在连上她的生活状态…</div>
+        <div class="since" id="since"></div>
+      </div>
+      <div class="card status">
+        <div class="clock" id="clock">--:--</div>
+        <div class="mood" id="mood">心情：—</div>
+        <div class="bar"><i id="energy" style="width:0%"></i></div>
+        <div class="bar-label">电量 <span id="energyText">0</span> / 100</div>
+      </div>
+      <div class="card meals">
+        <div class="title">今天吃了</div>
+        <div class="row" id="meals">—</div>
+        <div class="bowls" id="bowls"></div>
+      </div>
+      <div class="card feed">
+        <div class="title">最近</div>
+        <ul id="feed"></ul>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+  function fmtAgo(min) {
+    if (!min || min < 1) return '刚刚';
+    if (min < 60) return `${min} 分钟`;
+    const h = Math.floor(min / 60);
+    return `${h} 小时 ${min % 60} 分`;
+  }
+
+  // 每个场景配一段她的动作（都来自 dsh-pet 那 106 段）
+  const CLIPS = {
+    idle: '/assets/idle.webm',       // 待机呼吸休闲
+    work: '/assets/work.webm',       // 写代码
+    eat: '/assets/eat.webm',         // 吃白饭
+    phone: '/assets/phone.webm',     // 对屏碎碎念（刷抖音）
+    sleep: '/assets/sleep.webm',     // 原地小憩沉眠
+    window: '/assets/window.webm',   // 东张西望（窗边发呆）
+    walk: '/assets/walk.webm',       // 螃蟹走路（移动时用）
+    rubik: '/assets/rubik.webm',     // 原地专心玩魔方（摸鱼）
+    think: '/assets/think.webm',     // 深度思考碎碎念
+    hum: '/assets/hum.webm',         // 悠闲哼歌
+    yawn: '/assets/yawn.webm',       // 哈欠连天（深夜还醒着）
+    stretch: '/assets/stretch.webm', // 超大伸懒腰（早上刚起）
+    dance: '/assets/happy.webm',     // 可爱宅舞（被夸）
+    sulk: '/assets/sulk.webm',       // 傲娇生气（被叫机器人账号）
+  };
+
+  // 每个场景她站哪
+  const SPOTS = {
+    work:    { x: 41, bottom: 19, scale: .92 },
+    eat:     { x: 66, bottom: 15, scale: .94 },
+    phone:   { x: 54, bottom: 4,  scale: .86 },
+    rubik:   { x: 49, bottom: 4,  scale: .84 },
+    think:   { x: 38, bottom: 14, scale: .9 },
+    window:  { x: 68, bottom: 16, scale: .88 },
+    sleep:   { x: 20, bottom: 11, scale: .74 },
+    yawn:    { x: 30, bottom: 13, scale: .9 },
+    stretch: { x: 44, bottom: 14, scale: .95 },
+    hum:     { x: 66, bottom: 16, scale: .88 },
+    idle:    { x: 47, bottom: 13, scale: .96 },
+  };
+  // 气泡默认比脚底高 51% 舞台高；睡觉那幕她贴地，单独压低
+  const BUBBLE_AT = { sleep: { left: '26%', bottom: '50%' } };
+  function bubbleAt(scene) {
+    const spot = SPOTS[scene] ?? SPOTS.idle;
+    return BUBBLE_AT[scene] ?? { left: `${spot.x}%`, bottom: `${spot.bottom + 51}%` };
+  }
+
+  let currentX = null;
+  let walkTimer = 0;
+  let lastScene = 'idle';
+  let emoteKey = null;
+  let emoteTimer = 0;
+
+  function setClip(video, src) {
+    if (!src || video.dataset.src === src) return;
+    video.dataset.src = src;
+    video.src = src;
+    video.play().catch(() => {});
+  }
+
+  function placeHer(her, spot, faceLeft) {
+    currentX = spot.x;
+    her.style.left = `${spot.x}%`;
+    her.style.bottom = `${spot.bottom}%`;
+    her.style.transform = `translateX(-50%) scale(${spot.scale}) scaleX(${faceLeft ? -1 : 1})`;
+  }
+
+  /** 走到目标场景的落脚点：走路时播走路动作，到了再换该场景的动作。 */
+  function walkTo(video, her, scene) {
+    const spot = SPOTS[scene] ?? SPOTS.idle;
+    const from = currentX ?? spot.x;
+    const dx = spot.x - from;
+    if (Math.abs(dx) > 2) {
+      setClip(video, CLIPS.walk);
+      her.style.transition =
+        'left 1.4s cubic-bezier(.45,.05,.35,1), bottom 1.4s cubic-bezier(.45,.05,.35,1), transform 1.4s cubic-bezier(.45,.05,.35,1)';
+      clearTimeout(walkTimer);
+      walkTimer = setTimeout(() => {
+        walkTimer = 0;
+        setClip(video, CLIPS[lastScene] ?? CLIPS.idle);
+      }, 1450);
+    } else if (walkTimer === 0) {
+      setClip(video, CLIPS[scene] ?? CLIPS.idle);
+    }
+    placeHer(her, spot, dx < 0);
+  }
+
+  // 调试：?scene=work 预览某一幕；?walk=work,eat 让她隔 3 秒走一圈；?emote=dance / sulk 预览反应
+  const params = new URLSearchParams(location.search);
+  const FORCED_SCENE = params.get('scene');
+  const FORCED_EMOTE = params.get('emote');
+  const WALK_DEMO = (params.get('walk') || '').split(',').filter(Boolean);
+  const demoStart = Date.now();
+
+  function paint(state) {
+    const her = document.getElementById('her');
+    const video = document.getElementById('herVideo');
+    const now = Date.now();
+
+    let scene = FORCED_SCENE || state.scene || 'idle';
+    if (WALK_DEMO.length > 0) {
+      scene = WALK_DEMO[Math.floor((Date.now() - demoStart) / 3000) % WALK_DEMO.length];
+    }
+
+    // 她刚被夸 / 被叫机器人账号：先反应一下，放完再回原场景
+    const emote = FORCED_EMOTE
+      ? { clip: FORCED_EMOTE, key: `forced:${FORCED_EMOTE}`, reason: '', until: Infinity }
+      : state.emote && state.emote.until > now
+        ? state.emote
+        : null;
+
+    if (!emote && emoteKey !== null) {
+      emoteKey = null;
+      clearTimeout(emoteTimer);
+      emoteTimer = 0;
+    }
+
+    if (emote && emoteKey !== emote.key) {
+      emoteKey = emote.key;
+      lastScene = scene;
+      clearTimeout(walkTimer);
+      walkTimer = 0;
+      her.dataset.scene = emote.clip;
+      her.style.transition = 'left .45s ease, bottom .45s ease, transform .45s ease';
+      placeHer(her, SPOTS[scene] ?? SPOTS.idle, false);
+      setClip(video, CLIPS[emote.clip]);
+      clearTimeout(emoteTimer);
+      if (emote.until !== Infinity) {
+        emoteTimer = setTimeout(() => {
+          emoteKey = null;
+          emoteTimer = 0;
+          tick();
+        }, Math.max(300, emote.until - Date.now()));
+      }
+    }
+
+    const reacting = emoteKey !== null;
+    if (!reacting) {
+      lastScene = scene;
+      her.dataset.scene = scene;
+      walkTo(video, her, scene);
+    }
+
+    const at = bubbleAt(scene);
+    const bubbleEl = document.getElementById('bubble');
+    bubbleEl.style.left = at.left;
+    bubbleEl.style.bottom = at.bottom;
+    bubbleEl.textContent = reacting && !FORCED_EMOTE ? state.emote.reason : state.latest?.text ?? '';
+
+    const doing = document.getElementById('doing');
+    doing.innerHTML = `此刻：<b>${esc(state.activity)}</b>`;
+
+    document.getElementById('since').textContent = state.activityMinutes
+      ? `已经 ${fmtAgo(state.activityMinutes)}了`
+      : '';
+
+    document.getElementById('clock').textContent = state.clock;
+    document.getElementById('mood').textContent = `心情：${state.mood}`;
+    document.getElementById('energy').style.width = `${state.energy}%`;
+    document.getElementById('energyText').textContent = state.energy;
+
+    const m = state.meals;
+    document.getElementById('meals').textContent = m.todayCount
+      ? `${m.todayCount} 顿：${m.today.join(' / ')}`
+      : '还没吃（账本空着）';
+
+    const bowls = document.getElementById('bowls');
+    bowls.innerHTML = '';
+    const slots = ['早饭', '午饭', '晚饭', '宵夜'];
+    for (const slot of slots) {
+      const b = document.createElement('div');
+      b.className = 'b' + (m.today.some((t) => t.startsWith(slot)) ? '' : ' empty');
+      b.title = slot;
+      bowls.appendChild(b);
+    }
+
+    const feed = document.getElementById('feed');
+    feed.innerHTML = '';
+    for (const item of (state.timeline ?? []).slice(-7)) {
+      const li = document.createElement('li');
+      const t = new Date(item.at);
+      li.innerHTML = `<time>${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}</time><span>${esc(item.who)}：${esc(item.text)}</span>`;
+      feed.appendChild(li);
+    }
+  }
+
+  let offline = false;
+  async function tick() {
+    try {
+      const res = await fetch('/api/state', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      paint(await res.json());
+      if (offline) {
+        offline = false;
+        document.getElementById('doing').classList.remove('offline');
+      }
+    } catch (error) {
+      offline = true;
+      const doing = document.getElementById('doing');
+      doing.classList.add('offline');
+      doing.textContent = `连不上房间服务（${error.message}）`;
+    }
+  }
+
+  tick();
+  setInterval(tick, WALK_DEMO.length ? 800 : 3000);
+</script>
+</body>
+</html>
