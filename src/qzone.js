@@ -418,7 +418,11 @@ export function createQzonePoster({ config, log, runner, persona, voice, life, r
       const repeat = findRepeat(raw, material.posts);
       const hits = hitsMotifs(raw, banned);
       if (!repeat && hits.length === 0) {
-        const content = polish(raw, { recent: material.posts.slice(0, 2).map((post) => post.content), maxEmoji: 2 });
+        // decor 的 recent 约定是旧的在前，posts 是新的在前，倒一下
+        const content = polish(raw, {
+          recent: material.posts.slice(0, 2).map((post) => post.content).reverse(),
+          maxEmoji: 2,
+        });
         return { content, angle, prompt, material };
       }
 
