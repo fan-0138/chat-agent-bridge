@@ -56,8 +56,9 @@
 - **网络看门狗**：换 WiFi 后 QQ 客户端会「能发不能收」，它负责发现并自动恢复
 - **关掉前告别**：正常退出会先说一句；被硬杀下次启动会补一句
 - **饭饭账本**：到点记账，月初把上个月的翻给你
+- **房间面板**：`tools/room` 起一个本地小页面，实时看她此刻站在房间哪一处、播哪段动作；被夸会跳宅舞、被叫外号会气鼓鼓、深夜打哈欠——动作素材来自 dsh-pet 的 106 段动画
 - **防「AI 味」的机械兜底**：重复起头、emoji 堆叠、思考过程泄漏到正文……都有代码拦着
-- **213 个单测**（`npm test`），核心逻辑都拆成了纯函数
+- **264 个单测**（`npm test`），核心逻辑都拆成了纯函数
 
 ## 架构
 
@@ -194,13 +195,14 @@ nohup ./scripts/net-watch.sh >> logs/net-watch.log 2>&1 &
 | **launchd 托管** | launchd | 不受影响 | **自动上线** | 见下面的 macOS 限制 |
 
 ```bash
-./scripts/qqbridge-ctl.sh start       # 启动桥接 + 定时提醒 + 网络看门狗
+./scripts/qqbridge-ctl.sh start       # 启动桥接 + 定时提醒 + 网络看门狗 + 房间面板
 ./scripts/qqbridge-ctl.sh status      # 看状态（会显示父进程是不是 launchd）
 ./scripts/qqbridge-ctl.sh stop        # 停止（整组发 TERM，她会在 QQ 上道别）
-./scripts/qqbridge-ctl.sh stop-all    # 三个一起停
+./scripts/qqbridge-ctl.sh stop-all    # 四个一起停
 ./scripts/qqbridge-ctl.sh restart     # 重启（改完配置/掉线时用）
 
-./scripts/install-launchd.sh              # 装成开机自启（桥接 + 提醒 + 看门狗 + 防休眠）
+./scripts/install-launchd.sh              # 装成开机自启（桥接 + 提醒 + 看门狗 + 房间 + 防休眠）
+./scripts/install-launchd.sh --room       # 只装房间面板（不动正在跑的桥接）
 ./scripts/install-launchd.sh --uninstall  # 还原成手动
 ```
 
@@ -242,8 +244,9 @@ src/
   runner-factory.js  选模型后端：dsh / openai
   ...
 scripts/             常驻开关、launchd 安装、提醒、语音、表情包、抖音、看门狗
+tools/room/          「她此刻在干嘛」房间面板（本地 http://127.0.0.1:8770）
 docs/                踩坑记录、平台接入手册、性格刻度说明
-test/                213 个单测
+test/                264 个单测
 ```
 
 ## 常用命令
