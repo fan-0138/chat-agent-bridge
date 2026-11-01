@@ -81,6 +81,16 @@
     border-radius: 999px; padding: 6px 14px; pointer-events: none;
     transition: opacity 1s ease;
   }
+  /* 睡法切换：床边特写 / 房里远景（远处路过看一眼） */
+  #sleepMode {
+    position: absolute; right: 12px; bottom: 12px; z-index: 9;
+    font: inherit; font-size: 11.5px; color: rgba(220, 232, 255, .82);
+    background: rgba(10, 15, 26, .62); border: 1px solid rgba(140, 170, 255, .25);
+    border-radius: 999px; padding: 5px 12px; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  #sleepMode:hover { background: rgba(30, 44, 74, .85); color: #eaf2ff; }
+
   /* 关灯：把房间压暗一点（她自己会去按开关） */
   .stage.lights-off .room { filter: brightness(.62) saturate(.85); }
   .stage.house.lights-off .room { filter: brightness(.8) saturate(.92); }
@@ -138,7 +148,7 @@
   }
   #sleepScene.is-on { opacity: 1; visibility: visible; transition: opacity 1.2s ease; }
   /* 画面裁近一点：不然床太大、她像坐在别人床上 */
-  .sleep-zoom { position: absolute; inset: 0; transform: scale(1.18); transform-origin: 37% 45%; }
+  .sleep-zoom { position: absolute; inset: 0; transform: scale(1.10); transform-origin: 37% 47%; }
   #sleepBg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   #sleepDuvet { position: absolute; left: 0; top: 9%; width: 100%; height: 100%; display: block; }
   /* 上半身：坐在床头，腰以下交给被子挡着（只有一颗头会像被切开，别再来一次） */
@@ -269,6 +279,7 @@
 
     <div id="hotspots"></div>
     <div id="hint">点房间里的家具，她会自己过去</div>
+    <button id="sleepMode" type="button">睡觉：床边特写</button>
 
     <div class="hud">
       <div class="card identity">
@@ -404,6 +415,26 @@
   const sleepSceneEl = document.getElementById('sleepScene');
   const hintNode = document.getElementById('hint');   // 页尾还有一份 hintEl（9 秒后淡出那条），别重名
   const HINT_TEXT = hintNode.textContent;
+
+  /* 睡法：closeup=床边特写，room=大房间里远远看她睡（不切镜头） */
+  const SLEEP_MODE_LABEL = { closeup: '睡觉：床边特写', room: '睡觉：房里远景' };
+  const sleepModeBtn = document.getElementById('sleepMode');
+  let sleepView = QUERY.get('sleepview');
+  if (!SLEEP_MODE_LABEL[sleepView]) {
+    try { sleepView = localStorage.getItem('xixi.sleepview') || ''; } catch { sleepView = ''; }
+  }
+  if (!SLEEP_MODE_LABEL[sleepView]) sleepView = 'closeup';
+  const paintSleepMode = () => { sleepModeBtn.textContent = SLEEP_MODE_LABEL[sleepView]; };
+  paintSleepMode();
+  sleepModeBtn.addEventListener('click', async () => {
+    sleepView = sleepView === 'closeup' ? 'room' : 'closeup';
+    try { localStorage.setItem('xixi.sleepview', sleepView); } catch { /* 隐身窗口存不了，无所谓 */ }
+    paintSleepMode();
+    // 正在睡着就立刻换一种睡法，不用等他再点
+    if (inBed) await getUp({ manual: true });
+    sceneNow = null;
+    tick();
+  });
   // 仓库里不同步 assets/：床边特写的图不在就退回旧的打盹片段，别让床变成一块空白
   const SLEEP_SCENE_OK = await new Promise((resolve) => {
     const probe = new Image();
@@ -684,18 +715,24 @@
 
     if (scene === 'sleep') {
       her.dataset.scene = 'sleep';
-      if (HOUSE || !SLEEP_SCENE_OK) {
-        // 小屋那套素材没有床边特写，还是坐着打盹
+      if (HOUSE || !SLEEP_SCENE_OK || sleepView === 'room') {
+        // 小屋那套素材没有床边特写；远景模式也是：人留在房间里，远远看她睡
         setClip(CLIPS.sleep);
         sleeping = true;
         stageEl.classList.add('asleep');
         shadow.style.opacity = '0';
+        hintNode.textContent = '她睡着了 · 点一下就叫她起来';
+        hintNode.style.opacity = '1';
       } else {
         await tuckIn();
       }
     } else {
       setClip(CLIPS[scene] ?? CLIPS.idle);
       her.dataset.scene = scene;
+      if (hintNode.textContent !== HINT_TEXT) {
+        hintNode.textContent = HINT_TEXT;
+        hintNode.style.opacity = '0';
+      }
     }
     busy = false;
     nextStrollAt = Date.now() + (FORCE_STROLL ? 5000 : 18000 + Math.random() * 26000);

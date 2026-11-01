@@ -26,6 +26,21 @@ test('睡着的时候能看到上半身，不许只剩一颗头（那样像被�
   assert.match(html, /top: 9%;/, '被子整体压下去，让被沿横着落在她腰上');
 });
 
+test('两种睡法都能选：床边特写 / 房里远景', async () => {
+  const html = await readFile(resolve(ROOM, 'index.html'), 'utf8');
+  assert.match(html, /id="sleepMode"/, '要有切换按钮');
+  assert.match(html, /sleepview/, '要能用 ?sleepview= 固定');
+  assert.match(html, /SLEEP_MODE_LABEL/, '要有模式名表');
+  assert.match(html, /sleepView === 'room'/, '远景模式下不能切特写');
+  assert.match(html, /localStorage/, '选过的睡法要能记住');
+});
+
+test('床头点着暖光，别让她躺在黑里', async () => {
+  const build = await readFile(resolve(ROOM, 'blender/build_sleep.py'), 'utf8');
+  assert.match(build, /sleep_lamp_light/, '生成脚本里要有床头灯');
+  assert.match(build, /Emission Strength/, '灯罩要发光，不然是个白棍');
+});
+
 test('上床/起床是一套流程，不是直接换片段', async () => {
   const html = await readFile(resolve(ROOM, 'index.html'), 'utf8');
   assert.match(html, /async function tuckIn\(/, '缺上床（盖被子）');
@@ -46,7 +61,7 @@ test('床这个热区走到床沿，别站在褥子上', async () => {
 test('小屋版没有床边特写时，睡觉仍能演（回落到坐着打盹）', async () => {
   const html = await readFile(resolve(ROOM, 'index.html'), 'utf8');
   // HOUSE 分支里保留 CLIPS.sleep，别让小屋直接白屏
-  assert.match(html, /if \(HOUSE \|\| !SLEEP_SCENE_OK\)[\s\S]{0,200}CLIPS\.sleep/);
+  assert.match(html, /if \(HOUSE \|\| !SLEEP_SCENE_OK \|\| sleepView === 'room'\)[\s\S]{0,260}CLIPS\.sleep/);
 });
 
 test('睡觉的图如果同步过来了，就不能是空文件', async (t) => {

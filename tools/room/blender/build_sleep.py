@@ -4,6 +4,7 @@
 做三件事：
   1. 加一台床边相机 camSleep（机位固定，页面按这台相机算百分比坐标）
   2. 建一条有人形的被子 duvet（坐姿：膝盖在前面鼓起来，往脚踝平下去，四边垂到床外）
+  2.5 床头落地灯 + 暖光（夜里那盏，别让她躺在黑里）
   3. 出两张同机位的图：
        /tmp/blroom/bed-bg.png      空床（含枕头/床架/房间）
        /tmp/blroom/bed-duvet.png   只有被子，透明底（页面叠上去做呼吸/翻身）
@@ -56,6 +57,51 @@ for name in ('whale_body', 'whale_tail', 'whale_eye', 'whale_eye2', 'whale_fin')
     ob = bpy.data.objects.get(name)
     if ob:
         ob.location.x += 0.95
+
+# ── 2.5 床头落地灯 + 暖光 ──
+for name in ('sleep_lamp_base', 'sleep_lamp_pole', 'sleep_lamp_shade'):
+    ob = bpy.data.objects.get(name)
+    if ob:
+        bpy.data.objects.remove(ob, do_unlink=True)
+
+LX, LY = -2.86, -0.10
+bpy.ops.mesh.primitive_cylinder_add(radius=0.11, depth=0.04, location=(LX, LY, 0.02))
+base = bpy.context.object
+base.name = 'sleep_lamp_base'
+bpy.ops.mesh.primitive_cylinder_add(radius=0.014, depth=0.86, location=(LX, LY, 0.45))
+pole = bpy.context.object
+pole.name = 'sleep_lamp_pole'
+bpy.ops.mesh.primitive_cone_add(radius1=0.17, radius2=0.12, depth=0.20, location=(LX, LY, 0.97))
+shade = bpy.context.object
+shade.name = 'sleep_lamp_shade'
+
+for ob, mat_name in ((base, 'lamp_base_mat2'), (pole, 'lamp_base_mat2'), (shade, 'lamp_shade_mat2')):
+    mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
+    mat.use_nodes = True
+    bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    if bsdf:
+        if mat_name == 'lamp_shade_mat2':
+            bsdf.inputs['Base Color'].default_value = (0.98, 0.88, 0.70, 1.0)
+            bsdf.inputs['Roughness'].default_value = 0.65
+            if 'Emission Color' in bsdf.inputs:
+                bsdf.inputs['Emission Color'].default_value = (1.0, 0.78, 0.50, 1.0)
+                bsdf.inputs['Emission Strength'].default_value = 2.4
+        else:
+            bsdf.inputs['Base Color'].default_value = (0.30, 0.32, 0.40, 1.0)
+            bsdf.inputs['Roughness'].default_value = 0.5
+    ob.data.materials.append(mat)
+    for poly in ob.data.polygons:
+        poly.use_smooth = True
+
+lamp_light = bpy.data.objects.get('sleep_lamp_light')
+if lamp_light is None:
+    light_data = bpy.data.lights.new('sleep_lamp_lightData', 'POINT')
+    lamp_light = bpy.data.objects.new('sleep_lamp_light', light_data)
+    scene.collection.objects.link(lamp_light)
+lamp_light.data.energy = 48
+lamp_light.data.color = (1.0, 0.72, 0.46)
+lamp_light.data.shadow_soft_size = 0.2
+lamp_light.location = (LX, LY, 0.86)
 
 # ── 3. 被子 ──
 old = bpy.data.objects.get('duvet')
