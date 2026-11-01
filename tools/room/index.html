@@ -48,6 +48,17 @@
   .asleep .room { filter: brightness(.74) saturate(.86); }
   .asleep .vignette { background: radial-gradient(ellipse at 24% 62%, rgba(4, 6, 12, 0) 26%, rgba(4, 6, 12, .5) 100%); }
 
+  /* ── 小屋版（dsh-in-home 的娃娃屋，?house=1）── */
+  .stage.house { width: min(96vw, calc(96vh * 1376 / 768)); aspect-ratio: 1376 / 768; }
+  .stage.house .vignette { background: radial-gradient(ellipse at 50% 46%, rgba(6, 8, 14, 0) 62%, rgba(6, 8, 14, .26) 100%); }
+  .stage.house.asleep .room { filter: brightness(.86) saturate(.95); }
+  .stage.house.asleep .vignette { background: radial-gradient(ellipse at 34% 60%, rgba(6, 8, 14, 0) 36%, rgba(6, 8, 14, .4) 100%); }
+  .house-credit {
+    position: absolute; right: 10px; bottom: 8px; z-index: 9;
+    font-size: 10px; letter-spacing: .5px; color: rgba(210, 225, 255, .42);
+    pointer-events: none;
+  }
+
   /* ── 她 ── */
   #her {
     position: absolute;
@@ -164,10 +175,17 @@
         <div class="bowls" id="bowls"></div>
       </div>
     </div>
+    <div class="house-credit" id="houseCredit" hidden></div>
   </div>
 
 <script type="module">
-  import {
+  // 同一套页面逻辑，可以挂两块地板：
+  //   默认  = walk.mjs（Blender 渲的透视房间）
+  //   ?house=1 = house.mjs（dsh-in-home 的娃娃屋图，MIT · 星主）
+  const QUERY = new URLSearchParams(location.search);
+  const HOUSE = QUERY.has('house');
+  const FLOOR = await import(HOUSE ? './house.mjs' : './walk.mjs');
+  const {
     NODES,
     route,
     lengthMs,
@@ -177,7 +195,7 @@
     feetAt,
     pickStroll,
     SPRITE_BASE_HEIGHT,
-  } from './walk.mjs';
+  } = FLOOR;
 
   const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -207,7 +225,7 @@
   };
 
   // 房间是 Blender 渲的透视图：站位、路点、透视缩放都在 walk.mjs 里
-  const params = new URLSearchParams(location.search);
+  const params = QUERY;
   const FORCED_SCENE = params.get('scene');
   const FORCED_EMOTE = params.get('emote');
   const FORCE_STROLL = params.has('stroll');
@@ -219,6 +237,7 @@
   const video = document.getElementById('herVideo');
   const shadow = document.getElementById('herShadow');
   const bubbleEl = document.getElementById('bubble');
+  const roomBg = document.getElementById('roomBg');
   const stageEl = document.querySelector('.stage');
 
   let currentNode = 'idle';   // 她正站在哪个落脚点上（走一半被打断会变成 null）
@@ -244,9 +263,12 @@
     her.style.left = `${x.toFixed(3)}%`;
     her.style.bottom = `${bottom.toFixed(3)}%`;
     her.style.transform = `translateX(-50%) scale(${scale}) scaleX(${facing < 0 ? -1 : 1})`;
+    // 影子跟着立绘大小：宽约立绘一半、高按基础高度等比缩
+    const shadowH = 2.2 * (SPRITE_BASE_HEIGHT / 62);
     shadow.style.left = `${x.toFixed(3)}%`;
-    shadow.style.bottom = `${(feetAt(bottom) - 1.1).toFixed(3)}%`;
-    shadow.style.width = `${(9.5 * scale).toFixed(3)}%`;
+    shadow.style.bottom = `${(feetAt(bottom) - shadowH / 2).toFixed(3)}%`;
+    shadow.style.width = `${(0.152 * SPRITE_BASE_HEIGHT * scale).toFixed(3)}%`;
+    shadow.style.height = `${shadowH.toFixed(3)}%`;
     const head = bottom + SPRITE_BASE_HEIGHT * scale * 0.83 + 1.6;
     bubbleEl.style.left = `${x.toFixed(3)}%`;
     bubbleEl.style.bottom = `${head.toFixed(3)}%`;
@@ -527,6 +549,15 @@
       sceneNow = null;
     }
 
+    // 小屋版跟着她的钟点换白天/夜晚（20 点以后算夜里）
+    if (HOUSE) {
+      const nightNow = state.hour >= 20 || state.hour < 7;
+      if (roomBg.dataset.night !== String(nightNow)) {
+        roomBg.dataset.night = String(nightNow);
+        roomBg.src = nightNow ? '/assets/hut-night.webp' : '/assets/hut-day.webp';
+      }
+    }
+
     paintHud(state, scene, emote);
     if (emoteKey) return;
 
@@ -574,6 +605,17 @@
       doing.classList.add('offline');
       doing.textContent = `连不上房间服务（${error.message}）`;
     }
+  }
+
+  // 小屋版：换舞台比例、立绘大小、底图和署名
+  if (HOUSE) {
+    stageEl.classList.add('house');
+    her.style.height = `${SPRITE_BASE_HEIGHT}%`;
+    roomBg.dataset.night = 'true';
+    roomBg.src = '/assets/hut-night.webp';
+    const credit = document.getElementById('houseCredit');
+    credit.hidden = false;
+    credit.textContent = '小屋素材：dsh-in-home · 星主（MIT）';
   }
 
   // 开屏先站在地毯中间，然后自己走到该去的地方

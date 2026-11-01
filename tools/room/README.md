@@ -25,6 +25,7 @@ ROOM_PORT=8771 node tools/room/server.mjs   # 换端口
 
 | 参数 | 作用 |
 |---|---|
+| `?house=1` | 换成 dsh-in-home 的娃娃屋版（MIT · 星主），白天/夜晚跟着她的钟点切 |
 | `?scene=work` | 固定某一幕（sleep/rubik/eat/phone/think/hum/work/window/yawn/stretch/idle） |
 | `?scene=sleep` | 看她走到床上躺下、屋里灯暗下来、出 zzz |
 | `?walk=work,eat,window,phone` | 按顺序带她走一圈（每 4 秒一个地方，录演示用） |
@@ -97,11 +98,39 @@ python3 mcpctl.py exec <repo>/tools/room/blender/render_final.py
 
 一句话里既夸又喊外号，按被夸算。反应期间她会停在原地，气泡换成原因；放完再走回该做的事。
 
+## 小屋版（`?house=1`）
+
+同一套页面逻辑可以挂两块地板：
+
+- 默认：Blender 渲的透视房间（`walk.mjs`，相机投影反算站位）
+- `?house=1`：**主星上的机器人账号 · 小屋**的娃娃屋图（`house.mjs`）——
+  素材来自 [dsh-in-home](https://www.npmjs.com/package/dsh-in-home)（MIT, © 星主），
+  1376×768，白天/夜晚两张图跟着她的钟点切（20:00–7:00 用夜晚那张）。
+
+小屋版里这些照旧：她的 14 段动作、此刻在干嘛、电量心情、饭账本、被夸跳舞、
+被叫机器人账号生气、自己闲逛、深夜走到床上打盹。区别只是：
+
+- 地板换成一块大平层，站位和路网在 `house.mjs` 里按图片像素换算
+- 缩放直接沿用插件自己的深度系数：图里 y 430→665 对应 scale 0.78→1.0
+- 立绘比 Blender 房间小一号（42%），不然她比床还大会像巨人进屋
+
+素材不进仓库（和 assets/ 里其它二进制一样），自己从小屋插件包里拿：
+
+```sh
+mkdir -p /tmp/dsh-home && cd /tmp/dsh-home
+pnpm pack dsh-in-home && tar xzf dsh-in-home-*.tgz
+cp package/assets/hut-night.webp package/assets/hut-day.webp <repo>/tools/room/assets/
+```
+
+页面右下角会标注素材来源（MIT）。
+
 ## 在屋里走动
 
 走路是**真走**，不是场景一切换就瞬移：
 
-- `walk.mjs` 把房间地面拆成落脚点（11 个做事的位置 + 7 个闲逛点），连成一张能走的路网，
+- `floor.mjs` 是通用走法（落脚点图 / 寻路 / 缩放 / 闲逛），`walk.mjs`（Blender 房间）和
+  `house.mjs`（娃娃屋）各自只配路点和缩放系数
+- 房间地面拆成落脚点（11 个做事的位置 + 7 个闲逛点），连成一张能走的路网，
   床边只能从「床沿」上下、不会从地毯中间穿床过去
 - 每次换事做，先 `route()` 寻路，再按实际距离算走路时长（横向 16:9 折算成真实距离，15%/秒）
 - 走的时候播 `walk.webm`（螃蟹走路），每帧重算脚下位置、透视缩放和影子；

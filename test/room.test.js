@@ -115,7 +115,7 @@ test('frameOf：醒着的时候被夸就有反应，场景不变', () => {
 
 test('房间服务端和规则文件语法没问题', () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'tools/room');
-  for (const file of ['server.mjs', 'scene.mjs', 'walk.mjs']) {
+  for (const file of ['server.mjs', 'scene.mjs', 'walk.mjs', 'house.mjs', 'floor.mjs']) {
     execFileSync(process.execPath, ['--check', resolve(root, file)], { stdio: 'pipe' });
   }
 });
