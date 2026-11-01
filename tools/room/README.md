@@ -1,6 +1,6 @@
 # 小鲸的房间
 
-一个能实时看她此刻在干嘛的小页面：**2.5D 透视房间**（地板有纵深、家具有侧面、有落地阴影和灯光），她在里面走来走去。数据全是现成的，不额外存东西：
+一个能实时看她此刻在干嘛的小页面：**Blender 渲出来的 3D 房间**（真透视、真阴影、真灯光），她在里面走来走去。数据全是现成的，不额外存东西：
 
 - `data/life/state.json` —— 她此刻在做什么（activity / 开始时间）
 - `data/life/meals.jsonl` —— 饭账本（今天吃了几顿、谁喂的）
@@ -29,15 +29,33 @@ ROOM_PORT=8771 node tools/room/server.mjs   # 换端口
 | `?walk=work,eat,window,sleep` | 让她每 3 秒走到下一个地方 |
 | `?emote=dance` / `?emote=sulk` | 预览「被夸 / 被叫机器人账号」的反应 |
 
-## 房间怎么画出来的
+## 房间怎么画出来的（走 Blender MCP）
 
-纯 SVG 手绘，没有 3D 模型，也没有任何图片素材（除了她的立绘）：
+房间是 **Blender 5.2 + blender-mcp** 建的模、渲的图，不是手绘也不是贴图：
 
-- **一点透视**：后墙 + 左右侧墙往中间收，地板木纹线按远近排布；家具用「正面 + 顶面 + 侧面」三块拼出体积感
-- **景深**：站位用 `bottom` 控制远近，越靠前 `scale` 越大；走路时她本人和脚下的影子一起放大/缩小
-- **光**：窗外的月光 + 地面光斑、落地灯和台灯的暖光、机柜的冷光和显示器蓝光、串灯的呼吸
-- **接地**：每件家具脚下都有模糊阴影，不然看着像飘着
-- **前景**：左下角的植物、右下角的书堆压在最前面，撑出第三层景深
+```sh
+# 1. 确保 Blender GUI + addon 在线（端口 9876）
+python3 ~/Documents/deepseek/blender-mcp/ensure_blender.py
+# 2. 建模（家具/灯光/相机/材质，存 /tmp/blroom/room.blend）
+cd ~/Documents/deepseek/blender-mcp && python3 mcpctl.py exec <repo>/tools/room/blender/build_room.py
+# 3. 出图 + 打印站位投影（1920×1080，Cycles + 降噪，约 2 分钟）
+python3 mcpctl.py exec <repo>/tools/room/blender/render_final.py
+# 4. 加辉光/暗角，输出到 assets/room-bg.png
+/usr/bin/python3 <repo>/tools/room/blender/bloom.py /tmp/blroom/room_final.png <repo>/tools/room/assets/room-bg.png
+```
+
+页面的站位不是手调的，是渲染时用 `bpy_extras.object_utils.world_to_camera_view`
+把「地面点」和「头顶 1.3m」两个点投到画面上算出来的：
+
+- `bottom`：地面点的画面高度，再减去立绘脚底的透明留白
+- `scale`：按投影出来的身高换算（visible / 0.79 / 62）
+- `bubble`：头顶再往上一点
+
+所以她在窗下自然比在地毯上小、走到床边会变大——透视是渲染器的，不是 CSS 猜的。
+
+房间里有：机柜（LED 在闪）、床（毯子/枕头/鲸鱼玩偶）、书桌（显示器在跑代码、台灯、键盘、杯子）、
+圆桌 + 一大碗白饭、餐边柜（饭锅、碗摞、零食）、开放式书架、圆形地毯 + 坐垫、
+吊灯、落地灯、窗外的月亮/星星/城市、海报、挂钟、串灯和霓虹灯条。
 
 ## 状态怎么变成画面
 
@@ -79,7 +97,8 @@ ROOM_PORT=8771 node tools/room/server.mjs   # 换端口
 
 ## 素材
 
-所有动作都是 dsh-pet 里她的那 106 段 webm（透明背景），用到的 14 段复制在 `assets/`。
+- `assets/room-bg.png`：Blender 渲的房间底图（1920×1080，仓库不同步，按上面的步骤重新生成）
+- `assets/*.webm`：她的动作，全来自 dsh-pet 里那 106 段（透明背景），用到的 14 段复制在 `assets/`。
 仓库里只同步代码，不同步 `assets/`（二进制、且能从 dsh-pet 直接拿）：
 
 ```sh
