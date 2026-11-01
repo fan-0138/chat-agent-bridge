@@ -230,7 +230,17 @@ tail -50 data/qq/audit.jsonl | python3 -m json.tool --json-lines
 明天见。
 ```
 
-**链路**（`src/voice-out.js`）：文本 → Edge TTS（`edge-tts`，微软中文神经语音）→ mp3 → ffmpeg → 单声道 24k PCM → `silk-wasm` → SILK → base64 塞进 OneBot `record` 段。整条约 1.5–2 秒，语音时长和文字长度一起算进「打字延迟」。
+**两条合成链路**（`src/voice-out.js`，`QQ_VOICE_PROVIDER` 选）：
+
+| provider | 音色 | 一条要多久 |
+|---|---|---|
+| `edge`（默认） | 微软 Edge 神经语音（晓伊等），自然但「不是她」 | ~1.5–2 秒 |
+| `gpt-sovits` | 本地声音复刻，拿真人/视频里那种撒娇腔当参考 | 6–15 秒（M1 CPU） |
+
+两条后面共用：音源 → ffmpeg → 单声道 24k PCM → `silk-wasm` → SILK → base64 塞进 OneBot `record` 段。
+语音时长和文字长度一起算进「打字延迟」。
+
+声音复刻那一套怎么装、怎么扒参考音频，见 [声音复刻.md](./声音复刻.md)。
 
 **硬性边界**（都是故意的）：
 
@@ -250,7 +260,8 @@ npm run say -- --send "爸爸晚安"           # 真的发到你 QQ
 npm run say -- --list                      # 列出所有中文音色
 ```
 
-默认 `zh-CN-XiaoyiNeural`（晓伊，年轻活泼）。想换就改 `.env.qq`：
+默认 `zh-CN-XiaoyiNeural`（晓伊，年轻活泼）。想换就改 `.env.qq`（edge 那套用下面这些；
+用声音复刻就设 `QQ_VOICE_PROVIDER=gpt-sovits` + `QQ_TTS_REF` + `QQ_TTS_PROMPT_TEXT`）：
 
 ```bash
 QQ_VOICE_NAME=zh-CN-XiaoxiaoNeural   # 晓晓，更温和

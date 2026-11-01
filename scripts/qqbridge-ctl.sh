@@ -25,6 +25,8 @@ REMIND_LABEL=local.chat-agent-bridge.remind
 NETWATCH_LABEL=local.chat-agent-bridge.netwatch
 ROOM_LABEL=local.chat-agent-bridge.room
 ROOM_PORT=${ROOM_PORT:-8770}
+TTS_PORT=${TTS_PORT:-9880}
+TTS_DIR=${TTS_DIR:-$HOME/Documents/deepseek/tts/GPT-SoVITS}
 PLIST="$LA/$LABEL.plist"
 PIDFILE=logs/qq-bridge.pid
 CAFFFILE=logs/qq-caffeinate.pid
@@ -40,12 +42,16 @@ remind_sup_pid() { ps -axo pid=,args= | awk '$2=="/bin/sh" && $3 ~ /supervise-re
 watch_pid()  { ps -axo pid=,args= | awk '$2=="/bin/sh" && $3 ~ /net-watch\.sh$/ {print $1; exit}'; }
 # 按端口认房间进程，别把调试用的另一个端口认成它
 room_pid()   { lsof -nP -tiTCP:"$ROOM_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
+# 声音复刻服务也按端口认（它加载模型要几十秒，pid 文件不一定写得及时）
+tts_pid()    { lsof -nP -tiTCP:"$TTS_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
 
 running() { [ -n "$(node_pid)" ]; }
 not_running() { ! running; }
 remind_running() { [ -n "$(remind_pid)" ]; }
 watch_running() { [ -n "$(watch_pid)" ]; }
 room_running() { [ -n "$(room_pid)" ]; }
+tts_running() { [ -n "$(tts_pid)" ]; }
+not_tts_running() { ! tts_running; }
 not_remind_running() { ! remind_running; }
 not_watch_running() { ! watch_running; }
 not_room_running() { ! room_running; }
@@ -162,6 +168,41 @@ start_watch() {
   log "网络看门狗已启动（脱钩方式）。"
 }
 
+start_tts() {
+  if tts_running; then
+    log "声音复刻服务已经在跑：http://127.0.0.1:$TTS_PORT"
+    return 0
+  fi
+  if [ ! -x "$TTS_DIR/.venv/bin/python" ]; then
+    log "跳过声音复刻：没装 GPT-SoVITS（$TTS_DIR）"
+    return 0
+  fi
+  set -m
+  ( cd "$TTS_DIR" && nohup .venv/bin/python api_v2.py -a 127.0.0.1 -p "$TTS_PORT" \
+      -c GPT_SoVITS/configs/tts_infer.yaml >> "$OLDPWD/logs/tts.log" 2>&1 & )
+  # 加载 v2Pro 模型在 M1 上要 40-70 秒
+  if wait_until tts_running 100; then
+    echo "$(tts_pid)" > logs/tts.pid
+    log "声音复刻服务已启动（CPU，加载完模型才响应）：http://127.0.0.1:$TTS_PORT"
+    return 0
+  fi
+  log "声音复刻没起来，看 logs/tts.log"
+  return 1
+}
+
+stop_tts() {
+  _p=$(tts_pid)
+  if [ -n "$_p" ]; then
+    kill -TERM "$_p" 2>/dev/null
+    wait_until not_tts_running 15
+    rm -f logs/tts.pid
+    log "声音复刻服务已停止。"
+  else
+    rm -f logs/tts.pid
+    log "声音复刻服务本来就没在跑。"
+  fi
+}
+
 start_room() {
   if room_running; then
     log "小鲸的房间已经在跑：http://127.0.0.1:$ROOM_PORT"
@@ -252,6 +293,12 @@ status() {
   if remind_running; then log "  运行中：$(remind_pid)"; else log "  没在跑"; fi
   log "── 网络看门狗 ──"
   if watch_running; then log "  运行中：$(watch_pid)"; else log "  没在跑"; fi
+  log "── 声音复刻（GPT-SoVITS） ──"
+  if tts_running; then
+    log "  运行中：http://127.0.0.1:$TTS_PORT（python $(tts_pid)）"
+  else
+    log "  没在跑"
+  fi
   log "── 小鲸的房间 ──"
   if room_running; then
     log "  运行中：http://127.0.0.1:$ROOM_PORT（node $(room_pid)）"
@@ -266,11 +313,11 @@ status() {
 }
 
 case "${1:-status}" in
-  start)     start_bridge; start_room ;;
-  stop)      stop_bridge; stop_room ;;
-  restart)   stop_bridge; stop_room; sleep 1; start_bridge; start_room ;;
+  start)     start_bridge; start_tts; start_room ;;
+  stop)      stop_bridge; stop_tts; stop_room ;;
+  restart)   stop_bridge; stop_tts; stop_room; sleep 1; start_bridge; start_tts; start_room ;;
   status)    status ;;
-  start-all) start_bridge; start_remind; start_watch; start_room ;;
+  start-all) start_bridge; start_remind; start_watch; start_tts; start_room ;;
   stop-all)
     stop_bridge
     _stopped_remind=0
@@ -288,6 +335,7 @@ case "${1:-status}" in
     wait_until not_watch_running 20
     [ "$_stopped_watch" = "1" ] && log "网络看门狗已停止。"
     rm -f logs/net-watch.pid
+    stop_tts
     stop_room
     ;;
   *)

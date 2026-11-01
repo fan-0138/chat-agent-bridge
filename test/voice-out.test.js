@@ -57,3 +57,35 @@ test('关掉开关时即使装好了也不发', async () => {
   assert.equal(voiceOut.canSpeak().ok, false);
   await assert.rejects(() => voiceOut.speak('你好'), /语音没开/);
 });
+/* ── 声音复刻（GPT-SoVITS）接入（2026-11-02） ───────────────── */
+
+test('默认还是 edge：不配就用微软那套', () => {
+  const voice = createVoiceOut({
+    config: { voiceOutEnabled: true, edgeTtsBin: '/bin/echo' },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  const stats = voice.stats();
+  assert.equal(stats.provider, 'edge');
+});
+
+test('选了 gpt-sovits 但没配参考音频：明确说不可用，不瞎合成', () => {
+  const voice = createVoiceOut({
+    config: { voiceOutEnabled: true, voiceProvider: 'gpt-sovits', ttsRefAudio: '' },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(voice.enabled, false);
+  assert.match(voice.unavailable, /参考音频/);
+});
+
+test('参考音频不存在也拦住（别等 90 秒超时）', () => {
+  const voice = createVoiceOut({
+    config: {
+      voiceOutEnabled: true,
+      voiceProvider: 'gpt-sovits',
+      ttsRefAudio: '/tmp/definitely-not-here-4821.wav',
+    },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(voice.enabled, false);
+  assert.match(voice.unavailable, /找不到参考音频/);
+});

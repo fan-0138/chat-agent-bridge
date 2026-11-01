@@ -63,6 +63,11 @@ const DEFAULTS = {
   stickerDir: 'data/stickers',
   // ── 真的说出口：QQ 语音消息 ──
   voiceOutEnabled: true,
+  voiceProvider: 'edge', // edge=微软 Edge 神经语音；gpt-sovits=本地声音复刻
+  ttsUrl: 'http://127.0.0.1:9880/tts',
+  ttsRefAudio: '',
+  ttsPromptText: '',
+  ttsSpeed: 1,
   voiceOutName: 'zh-CN-XiaoyiNeural',
   voiceOutPitch: '+0Hz',
   voiceOutRate: '+5%',
@@ -204,6 +209,11 @@ export function loadQqConfig(env = process.env) {
     stickerChance: Number(env.QQ_STICKER_CHANCE ?? DEFAULTS.stickerChance),
     stickerDir: env.QQ_STICKER_DIR?.trim() || DEFAULTS.stickerDir,
     voiceOutEnabled: readBool(env, 'QQ_VOICE_OUT', DEFAULTS.voiceOutEnabled),
+    voiceProvider: env.QQ_VOICE_PROVIDER?.trim() || DEFAULTS.voiceProvider,
+    ttsUrl: env.QQ_TTS_URL?.trim() || DEFAULTS.ttsUrl,
+    ttsRefAudio: env.QQ_TTS_REF?.trim() || DEFAULTS.ttsRefAudio,
+    ttsPromptText: env.QQ_TTS_PROMPT_TEXT?.trim() || DEFAULTS.ttsPromptText,
+    ttsSpeed: Number(env.QQ_TTS_SPEED?.trim() || DEFAULTS.ttsSpeed) || 1,
     voiceOutName: env.QQ_VOICE_NAME?.trim() || DEFAULTS.voiceOutName,
     voiceOutPitch: env.QQ_VOICE_PITCH?.trim() || DEFAULTS.voiceOutPitch,
     voiceOutRate: env.QQ_VOICE_RATE?.trim() || DEFAULTS.voiceOutRate,
