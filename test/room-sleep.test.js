@@ -11,12 +11,19 @@ const ROOM = resolve(HERE, '../tools/room');
 
 test('页面里有睡觉特写：空床 / 被子 / 睡脸三层', async () => {
   const html = await readFile(resolve(ROOM, 'index.html'), 'utf8');
-  for (const id of ['sleepScene', 'sleepBg', 'sleepDuvet', 'sleepHead']) {
+  for (const id of ['sleepScene', 'sleepBg', 'sleepDuvet', 'sleepBody']) {
     assert.match(html, new RegExp(`id="${id}"`), `页面缺 #${id}`);
   }
-  for (const file of ['bed-bg.png', 'bed-duvet.png', 'sleep-head.png']) {
+  for (const file of ['bed-bg.png', 'bed-duvet.png', 'sleep-body.png']) {
     assert.match(html, new RegExp(file), `页面没引用 ${file}`);
   }
+});
+
+test('睡着的时候能看到上半身，不许只剩一颗头（那样像被切开的）', async () => {
+  const html = await readFile(resolve(ROOM, 'index.html'), 'utf8');
+  assert.doesNotMatch(html, /id="sleepHead"/, '别再用「只有一颗头」的图');
+  assert.match(html, /#sleepBody\s*\{[\s\S]{0,200}bottom:/, '上半身要落在被子沿上');
+  assert.match(html, /top: 9%;/, '被子整体压下去，让被沿横着落在她腰上');
 });
 
 test('上床/起床是一套流程，不是直接换片段', async () => {
@@ -43,7 +50,7 @@ test('小屋版没有床边特写时，睡觉仍能演（回落到坐着打盹�
 });
 
 test('睡觉的图如果同步过来了，就不能是空文件', async (t) => {
-  for (const file of ['bed-bg.png', 'bed-duvet.png', 'sleep-head.png']) {
+  for (const file of ['bed-bg.png', 'bed-duvet.png', 'sleep-body.png']) {
     try {
       const info = await stat(resolve(ROOM, 'assets', file));
       assert.ok(info.size > 1000, `${file} 太小了（${info.size} 字节）`);

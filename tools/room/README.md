@@ -42,20 +42,23 @@ ROOM_PORT=8771 node tools/room/server.mjs   # 换端口
 | 层 | 文件 | 干什么 |
 |---|---|---|
 | 空床背景 | `assets/bed-bg.png` | 枕头、床架、房间（`camSleep` 机位渲的 1920×1080） |
-| 被子 | `assets/bed-duvet.png` | 透明底，带身体隆起和布褶；盖上来、呼吸、翻身都靠 CSS 动它 |
-| 睡脸 | `assets/sleep-head.png` | 从 `sleep.webm` 闭眼那帧抠的头，摆在枕头上 |
+| 被子 | `assets/bed-duvet.png` | 透明底，坐姿（膝盖鼓、往脚踝平下去）+ 布褶；页面里整体压下去 9%，让被沿横着落在她腰上 |
+| 她 | `assets/sleep-body.png` | 从 `sleep.webm` 闭眼那帧抠的**上半身**（头+肩+手），坐在床头、腰以下交给被子 |
 
-流程：点床（或她自己夜里困了）→ 走到床沿 → 立绘淡出 → 被子从下往上盖好 → 睡脸浮出来 →
+流程：点床（或她自己夜里困了）→ 走到床沿 → 立绘淡出 → 被子从下往上盖好 → 她（上半身）浮出来 →
 呼吸（被子 scaleY 微动、头轻微起伏，5.6 秒一轮）→ 每 20–40 秒翻个身（头转一下、被子跟着晃）→
 点一下叫她起来 → 被子滑走 → 立绘回来播伸懒腰，还会说「唔…人家还没睡够」。
 刚被叫醒的十分钟内不会再自动躺回去（状态里写「在睡」也不睡），不然夜里一戳就睁眼又闭眼。
+
+**别做「只剩一颗头」的版本**：一颗头摆在枕头上、被子底下没有身体，暗光里看着像被切开的（11-02 反馈）。
+所以睡觉这一幕是「靠着床头坐起来、被子盖到腰」，上半身和被子在同一条被沿上。
 
 重新生成（Blender GUI + addon 在 9876）：
 
 ```sh
 python3 ~/Documents/deepseek/blender-mcp/mcpctl.py exec tools/room/blender/build_sleep.py
 python3 tools/room/blender/tint_duvet.py       # 白布被台灯打爆，压蓝一点
-python3 tools/room/blender/make_sleep_head.py  # VP9 的 alpha 要用 libvpx-vp9 解码才拿得到
+python3 tools/room/blender/make_sleep_body.py  # VP9 的 alpha 要用 libvpx-vp9 解码才拿得到
 ```
 
 小屋版（`?house=1`）没有这套素材，仍然用 `sleep.webm` 坐着打盹；`assets/` 没同步时也会自动回落到它。

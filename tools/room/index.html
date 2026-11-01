@@ -137,7 +137,32 @@
     transition: opacity 1.2s ease, visibility 0s linear 1.2s;
   }
   #sleepScene.is-on { opacity: 1; visibility: visible; transition: opacity 1.2s ease; }
-  #sleepBg, #sleepDuvet { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  /* 画面裁近一点：不然床太大、她像坐在别人床上 */
+  .sleep-zoom { position: absolute; inset: 0; transform: scale(1.18); transform-origin: 37% 45%; }
+  #sleepBg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #sleepDuvet { position: absolute; left: 0; top: 9%; width: 100%; height: 100%; display: block; }
+  /* 上半身：坐在床头，腰以下交给被子挡着（只有一颗头会像被切开，别再来一次） */
+  #sleepBody {
+    position: absolute; left: 41%; bottom: 51.8%; width: 19.5%; height: auto;
+    transform: translateX(-50%);
+    opacity: 0; transition: opacity .9s ease .35s;
+    filter: drop-shadow(0 12px 18px rgba(6, 10, 22, .45));
+  }
+  #sleepScene.is-on #sleepBody {
+    opacity: 1;
+    animation: body-breathe 5.6s ease-in-out 1.4s infinite;
+  }
+  @keyframes body-breathe {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50%      { transform: translateX(-50%) translateY(-.45%); }
+  }
+  /* 翻身：头歪一下、被子跟着晃 */
+  #sleepScene.is-turn #sleepBody { animation: body-turn 2.8s ease-in-out; }
+  @keyframes body-turn {
+    0%, 100% { transform: translateX(-50%) rotate(0deg); }
+    35%      { transform: translateX(-51.5%) rotate(-3.5deg); }
+    70%      { transform: translateX(-50.6%) rotate(1.2deg); }
+  }
   #sleepDuvet {
     opacity: 0; transform: translateY(11%) scale(1.03);
     transform-origin: 50% 100%;
@@ -151,28 +176,6 @@
   @keyframes duvet-breathe {
     0%, 100% { transform: translateY(0) scaleY(1); }
     50%      { transform: translateY(-.35%) scaleY(1.006); }
-  }
-  #sleepHead {
-    position: absolute; left: 36.1%; top: 49.2%; width: 16.6%;
-    transform: translate(-50%, -50%) rotate(-9deg);
-    transform-origin: 50% 88%;
-    opacity: 0; transition: opacity .9s ease .5s;
-    filter: drop-shadow(0 8px 12px rgba(6, 10, 22, .4));
-  }
-  #sleepScene.is-on #sleepHead {
-    opacity: 1;
-    animation: head-breathe 5.6s ease-in-out 1.5s infinite;
-  }
-  @keyframes head-breathe {
-    0%, 100% { transform: translate(-50%, -50%) rotate(-9deg); }
-    50%      { transform: translate(-50%, -50.7%) rotate(-10.3deg); }
-  }
-  /* 偶尔翻个身：头转一下、被子跟着动 */
-  #sleepScene.is-turn #sleepHead { animation: head-turn 2.8s ease-in-out; }
-  @keyframes head-turn {
-    0%, 100% { transform: translate(-50%, -50%) rotate(-9deg); }
-    35%      { transform: translate(-52%, -50%) rotate(-15deg); }
-    70%      { transform: translate(-51%, -49.4%) rotate(-6deg); }
   }
   #sleepScene.is-turn #sleepDuvet { animation: duvet-turn 2.8s ease-in-out; }
   @keyframes duvet-turn {
@@ -248,10 +251,12 @@
 
     <!-- 睡觉特写：空床 ← 被子 ← 睡脸（同一机位的三层，见 #sleepScene 的样式注释） -->
     <div id="sleepScene" aria-hidden="true">
-      <img id="sleepBg" src="/assets/bed-bg.png" alt="" />
-      <img id="sleepDuvet" src="/assets/bed-duvet.png" alt="" />
-      <img id="sleepHead" src="/assets/sleep-head.png" alt="小鲸睡着了" />
-      <div id="sleepZzz">z z z</div>
+      <div class="sleep-zoom">
+        <img id="sleepBg" src="/assets/bed-bg.png" alt="" />
+        <img id="sleepBody" src="/assets/sleep-body.png" alt="小鲸靠在床头睡着了" />
+        <img id="sleepDuvet" src="/assets/bed-duvet.png" alt="" />
+        <div id="sleepZzz">z z z</div>
+      </div>
     </div>
 
     <div id="herShadow"></div>

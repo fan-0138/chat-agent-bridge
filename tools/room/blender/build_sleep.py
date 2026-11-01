@@ -3,7 +3,7 @@
 
 做三件事：
   1. 加一台床边相机 camSleep（机位固定，页面按这台相机算百分比坐标）
-  2. 建一条有人形的被子 duvet（肩膀鼓、腿那边低、带布褶、四边垂到床外）
+  2. 建一条有人形的被子 duvet（坐姿：膝盖在前面鼓起来，往脚踝平下去，四边垂到床外）
   3. 出两张同机位的图：
        /tmp/blroom/bed-bg.png      空床（含枕头/床架/房间）
        /tmp/blroom/bed-duvet.png   只有被子，透明底（页面叠上去做呼吸/翻身）
@@ -65,7 +65,7 @@ mesh = bpy.data.meshes.new('duvet')
 ob = bpy.data.objects.new('duvet', mesh)
 scene.collection.objects.link(ob)
 
-X0, X1 = -2.80, -1.24
+X0, X1 = -2.86, -1.24
 Y0, Y1 = -1.64, -0.26
 NX, NY = 160, 100
 TOP = 0.335
@@ -77,17 +77,16 @@ for i in range(NX + 1):
         y = Y0 + (Y1 - Y0) * v
         z = TOP + 0.030
 
-        # 身体：肩 → 腰 → 腿，越往脚越平
-        shoulder = 0.22 * math.exp(-((x + 2.50) / 0.24) ** 2)
-        belly = 0.17 * math.exp(-((x + 2.14) / 0.32) ** 2)
-        legs = 0.11 * math.exp(-((x + 1.74) / 0.28) ** 2)
-        across = math.exp(-((y + 0.98) / 0.46) ** 4)
-        z += (shoulder + belly + legs) * across
+        # 坐姿：膝盖在前面鼓起来，往脚踝那边平下去
+        knee = 0.20 * math.exp(-((x + 2.34) / 0.26) ** 2)
+        shin = 0.10 * math.exp(-((x + 1.86) / 0.30) ** 2)
+        lap = 0.07 * math.exp(-((x + 2.62) / 0.20) ** 2)
+        across = math.exp(-((y + 0.98) / 0.44) ** 4)
+        z += (knee + shin + lap) * across
 
-        # 头端压平（别糊成一堵墙）+ 翻折的被子口
-        z -= 0.075 * (1 - smoothstep(-2.80, -2.60, x))
-        z += 0.045 * math.exp(-((x + 2.575) / 0.045) ** 2) * smoothstep(-1.34, -0.52, y) * (1 - smoothstep(-0.46, -0.30, y))
-        z -= 0.07 * smoothstep(-1.48, -1.24, x)
+        # 靠她腰的那一头收窄、压低（掖在被子边上，别成墙）
+        z -= 0.055 * (1 - smoothstep(-2.86, -2.66, x))
+        z -= 0.06 * smoothstep(-1.46, -1.24, x)
 
         # 褶子
         z += 0.010 * math.sin((x + 2.0) * 23.0 + (y + 1.0) * 5.0) * (1 - across)
