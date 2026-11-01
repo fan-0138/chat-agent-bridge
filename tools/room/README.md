@@ -165,6 +165,10 @@ dsh-pet 那 106 段全是原地动作，没有真正的走路循环（「螃蟹�
 现在的做法：切换时临时加 200ms 的 transition，淡完立刻去掉 transition、把退出那块
 `pause()` + `visibility: hidden`，稳态不留合成层。改这块时记得测一下 `requestAnimationFrame`
 的实际间隔（应该 ~16.6ms，不是 ~33ms）。
+
+> 另一个坑：`visibility` 千万别用内联样式写死（`el.style.visibility = 'hidden'`），
+> 内联的优先级高于 `.is-on` 类，会让走路那块视频一直藏着——表现就是「一动就不见了」。
+> 显隐只走 class，切换时顺手 `next.style.visibility = ''` 清掉残留。
 - 她忙自己的事时，每隔 20–45 秒会起来逛一圈：地毯边 → 窗下/书架前/床边，
   站一两秒看看，再走回原来的位置继续（`?stroll=1` 可以马上看到）
 - 被夸/被叫机器人账号时会当场停下反应，反应完再走回去

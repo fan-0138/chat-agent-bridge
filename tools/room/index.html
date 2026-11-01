@@ -324,6 +324,7 @@
       }
     }
     next.play().catch(() => {});
+    next.style.visibility = '';
     next.style.transition = 'opacity .16s linear';
     next.classList.add('is-on');
     old.style.transition = 'opacity .16s linear';
@@ -681,7 +682,6 @@
   currentClip = CLIPS.idle;
   videoB.src = WALK_SRC;
   videoB.dataset.src = WALK_SRC;
-  videoB.style.visibility = 'hidden';
 
   // 小屋版：换舞台比例、立绘大小、底图和署名
   if (HOUSE) {
