@@ -288,6 +288,10 @@ async function main() {
   async function sendToOwner(text) {
     if (!owner || config.dryRun) return;
     await transport.reply(ownerTarget, text);
+    // 月报、告别这类是桥接替她发的：不写进记忆，她下一句就不知道自己发过什么
+    await memory.append(ownerTarget.conversationId ? `user_${ownerTarget.conversationId}` : `user_${owner}`, 'assistant', text, {
+      kind: 'system',
+    }).catch(() => {});
   }
 
   async function mealTick() {

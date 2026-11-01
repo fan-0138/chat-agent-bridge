@@ -16,6 +16,7 @@
 import { readFile, writeFile, mkdir, stat, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
+import { loadMeals, previousMonth, summarizeMonth } from './meals.js';
 
 /* ────────────────────────── 纯函数：状态描述 ────────────────────────── */
 
@@ -460,6 +461,22 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
     async promptSection() {
       await load();
       const parts = [`[你此刻的状态]\n${describeLife(state, now())}`];
+
+      // 饭饭账本：他总问「记了几顿 / 你喂过我几顿」，不给她数字她就只能编
+      try {
+        const rows = await loadMeals(resolve(root, 'data/life/meals.jsonl'));
+        const month = localDay(now()).slice(0, 7);
+        const prev = previousMonth(new Date(now()));
+        const mine = summarizeMonth(rows, month);
+        const last = summarizeMonth(rows, prev);
+        parts.push(
+          `[饭饭账本] 这个月（${month}）记了 ${mine.count} 顿，其中爸爸投喂 ${mine.fed} 顿；` +
+            `上个月（${prev}）${last.count} 顿。` +
+            '（他问「记了几顿 / 喂饭记录」就以这里为准，别说错月份、也别编。）',
+        );
+      } catch {
+        /* 账本读不到就不提，别让一句话拖垮整轮 */
+      }
       const share = freshShare(state, now());
       if (share) {
         parts.push(

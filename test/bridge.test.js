@@ -505,3 +505,20 @@ test('聊天提示里也不许编爸爸说过的话', async () => {
   await bridge.handle({ ...baseMsg, id: 'm-no-fake-memory' });
   assert.match(prompts[0], /别编爸爸说过的话/);
 });
+
+test('系统替她发的消息（月报等）在历史里标清楚', async () => {
+  const prompts = [];
+  const { bridge, memory } = await setup({
+    config: makeConfig({ channel: 'qq' }),
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '嗯。', durationMs: 5 };
+      },
+    },
+  });
+  await memory.append('user_wxid_alice', 'assistant', '爸爸，2026-10 的饭饭账本翻出来了：一共 26 顿。', { kind: 'system' });
+  await bridge.handle({ ...baseMsg, id: 'm-sys-1', text: '你不是写出来了吗' });
+  assert.match(prompts[0], /系统代发的/);
+  assert.match(prompts[0], /一共 26 顿/);
+});

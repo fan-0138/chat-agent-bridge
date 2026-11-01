@@ -248,3 +248,38 @@ test('待分享有时效，过期就不提了', () => {
 test('localDay 用本地时区且长度固定', () => {
   assert.equal(localDay(new Date(2026, 0, 5, 12, 0, 0).getTime()), '2026-01-05');
 });
+/* ── 饭饭账本：她要知道到底记了几顿（2026-11-01 实录） ── */
+
+test('prompt 里带上账本数字，别让她凭印象说', async () => {
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createLife } = await import('../src/life.js');
+
+  const root = await mkdtemp(join(tmpdir(), 'life-meals-'));
+  await mkdir(join(root, 'data/life'), { recursive: true });
+  const now = new Date(2026, 10, 1, 12, 0, 0); // 2026-11-01 中午
+  await writeFile(
+    join(root, 'data/life/meals.jsonl'),
+    [
+      { at: '2026-10-30T03:00:00.000Z', day: '2026-10-30', slot: '午饭', dish: '西瓜', by: '爸爸', source: 'fed' },
+      { at: '2026-10-31T03:00:00.000Z', day: '2026-10-31', slot: '午饭', dish: '炒饭', by: null, source: 'auto' },
+      { at: '2026-11-01T01:00:00.000Z', day: '2026-11-01', slot: '早饭', dish: '小笼包', by: null, source: 'auto' },
+    ]
+      .map((row) => JSON.stringify(row))
+      .join('\n') + '\n',
+    'utf8',
+  );
+
+  const life = createLife({
+    config: { ...config, lifeEnabled: true },
+    log: { info() {}, warn() {}, debug() {} },
+    root,
+    now: () => now.getTime(),
+  });
+  const text = await life.promptSection();
+  assert.match(text, /\[饭饭账本\]/);
+  assert.match(text, /这个月（2026-11）记了 1 顿/);
+  assert.match(text, /上个月（2026-10）2 顿/);
+  assert.match(text, /其中爸爸投喂 0 顿/);
+});

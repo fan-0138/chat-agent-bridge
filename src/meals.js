@@ -144,8 +144,10 @@ export function formatMonthReport(summary) {
     .map(([slot, times]) => `${slot} ${times}`)
     .join('、');
   if (slotText) lines.push(`${slotText}。`);
-  if (summary.fed > 0) lines.push(`你投喂了 ${summary.fed} 次，人家都记着。`);
-  else lines.push('这个月你一次都没投喂，哼。');
+  // 月报讲的是「上个月」，这里再说「这个月」会让她把月份串起来——
+  // 2026-11-01 她就照着这句说成「这个月爸爸一次都没投喂」。
+  if (summary.fed > 0) lines.push(`那阵子你投喂了 ${summary.fed} 次，人家都记着。`);
+  else lines.push(`那阵子你一次都没投喂，哼（${summary.month}）。`);
   return lines.join('\n');
 }
 

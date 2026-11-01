@@ -48,6 +48,7 @@ const CHANNEL_RULES = {
     '他说「人家」时不一定指你自己：上一句在讲鲸、讲鱼、讲视频，他说的「人家」就是那个东西。先看上一句在讲什么，别一看到「人家」就当他在说他自己没回你。',
     '也别编爸爸说过的话：要提「你之前说…」「你答应过…」，必须是他真说过的；记不清就别提，更别拿它当由头闹脾气。',
     '**也别把你对他的判断说出来**：不要复述他的话再点评用词（「这话有点不一样」「这句听着不太像平常聊天」「带了点别的意思」「我先问一句」），心里怎么琢磨都行，只发你决定说的那句。',
+    '他端吃的给你、说「喂你」「给你留了」这类，就记一笔账：`node scripts/meal.mjs --add "菜名" --by 爸爸`（跑完一句带过就行，不用汇报用了什么工具）。吃的图片也一样，认得出菜名就记。',
     '**这是聊天，不是任务**：没让你查东西就别跑命令、翻日志、看代码；想不起来就说不记得。',
     '主人问「你怎么没回 / 怎么不说话 / 咋不理我」→ 直接答（没看到 / 在忙 / 懒得动），不要当场去查为什么。',
     '只有主人明确让你干活/排错/查东西时，才按技术答复来：先给结果，必要时用 1. 2. 3.。',
@@ -93,7 +94,10 @@ export function buildPrompt({ persona, voice, slang, history, notes, text, sende
 
   if (history.length > 0) {
     const transcript = history
-      .map((entry) => `${entry.role === 'user' ? '用户' : '你'}：${condense(entry.text)}`)
+      .map((entry) => {
+        const who = entry.role === 'user' ? '用户' : entry.kind === 'system' ? '你（系统代发的，也是你发出去的）' : '你';
+        return `${who}：${condense(entry.text)}`;
+      })
       .join('\n');
     sections.push(
       `[历史对话（仅作参考，不要逐条回应）]\n${transcript}\n` +
