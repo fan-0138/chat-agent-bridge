@@ -134,6 +134,10 @@ export function createVoiceOut({
   const ttsRefAudio = config.ttsRefAudio || '';
   const ttsPromptText = config.ttsPromptText || '';
   const ttsSpeed = Number(config.ttsSpeed ?? 1) || 1;
+  // 合成出来的电平普遍偏低（复刻模型 -23 LUFS、edge -22 LUFS），手机外放像蚊子叫。
+  // 统一拉到 -16 LUFS / 峰 -1.5 dB，设空字符串可以关掉。
+  const loudnorm =
+    config.voiceLoudnorm ?? 'loudnorm=I=-16:TP=-1.5:LRA=11';
   const timeoutMs = config.voiceOutTimeoutMs ?? (provider === 'gpt-sovits' ? 90_000 : 25_000);
 
   const binPath = isAbsolute(bin) ? bin : resolve(process.cwd(), bin);
@@ -190,9 +194,21 @@ export function createVoiceOut({
       // 音源（mp3 或 wav）→ 单声道 24k 裸 PCM → SILK
       const pcm = await run(
         ffmpeg,
-        ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 's16le', '-ar', '24000', '-ac', '1', 'pipe:1'].map(
-          String,
-        ),
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-i',
+          'pipe:0',
+          ...(loudnorm ? ['-af', loudnorm] : []),
+          '-f',
+          's16le',
+          '-ar',
+          '24000',
+          '-ac',
+          '1',
+          'pipe:1',
+        ].map(String),
         { timeoutMs, stdin: audio },
       );
       const silk = await encode(pcm, 24000);
@@ -251,6 +267,7 @@ export function createVoiceOut({
     unavailable,
     voiceName: label,
     provider,
+    loudnorm,
     canSpeak,
     speak,
     stats() {

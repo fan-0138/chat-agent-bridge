@@ -237,7 +237,8 @@ tail -50 data/qq/audit.jsonl | python3 -m json.tool --json-lines
 | `edge`（默认） | 微软 Edge 神经语音（晓伊等），自然但「不是她」 | ~1.5–2 秒 |
 | `gpt-sovits` | 本地声音复刻，拿真人/视频里那种撒娇腔当参考 | 6–15 秒（M1 CPU） |
 
-两条后面共用：音源 → ffmpeg → 单声道 24k PCM → `silk-wasm` → SILK → base64 塞进 OneBot `record` 段。
+两条后面共用：音源 → ffmpeg（**响度归一到 -16 LUFS**，不然手机外放像蚊子叫）→ 单声道 24k PCM
+→ `silk-wasm` → SILK → base64 塞进 OneBot `record` 段。
 语音时长和文字长度一起算进「打字延迟」。
 
 声音复刻那一套怎么装、怎么扒参考音频，见 [声音复刻.md](./声音复刻.md)。

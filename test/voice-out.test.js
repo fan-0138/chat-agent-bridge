@@ -89,3 +89,18 @@ test('参考音频不存在也拦住（别等 90 秒超时）', () => {
   assert.equal(voice.enabled, false);
   assert.match(voice.unavailable, /找不到参考音频/);
 });
+
+test('响度归一默认开着，可以用空字符串关掉', () => {
+  // 合成电平 -22~-23 LUFS，手机外放像蚊子叫；默认过一遍 loudnorm 拉到 -16
+  const voice = createVoiceOut({
+    config: { voiceOutEnabled: true, edgeTtsBin: '/bin/echo' },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(voice.loudnorm, 'loudnorm=I=-16:TP=-1.5:LRA=11');
+
+  const off = createVoiceOut({
+    config: { voiceOutEnabled: true, edgeTtsBin: '/bin/echo', voiceLoudnorm: '' },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(off.loudnorm, '');
+});
