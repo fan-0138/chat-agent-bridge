@@ -100,6 +100,38 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     }
   }
 
+  /**
+   * 模型偶尔会把「心里话」当正文发出去，两种都走同一个兜底：先抢救（剥掉），剥不干净就让它重说一遍。
+   *   1) 列候选句 / 报刻度 / 自我指挥（2026-10-26 实录）
+   *   2) 他打错字，她当面分析「他这话什么意思」（2026-10-28 实录）
+   * 以前这两段各写一遍「抢救 + 重说 + 兜底」，改一处忘另一处。
+   * 顺手修掉一个 bug：重说那步抛异常时，原 answer（心里话）还留在变量里，
+   * 原来的 `if (!answer)` 兜不住，会把心里话原样发出去。现在无论怎么失败都落 fallback。
+   */
+  async function repairLeak({ prompt, active, answer, userText, isLeak, strip, label, retryNote, fallback }) {
+    const current = String(answer ?? '').trim();
+    if (!isLeak(current, userText)) return current;
+
+    log.warn(`回复混进了${label}（${current.length} 字），先抢救`);
+    const rescued = strip(current);
+    if (rescued) {
+      log.info(`剥掉${label}，留下正文：${rescued.slice(0, 40)}`);
+      return rescued;
+    }
+
+    let text = '';
+    try {
+      const retry = await active.run(`${prompt}\n\n[纠正] ${retryNote}`);
+      text = String(retry.text ?? '').trim();
+      if (looksLikeThinking(text)) text = stripThinking(text) || '';
+      if (looksLikeSelfTalk(text, userText)) text = stripSelfTalk(text);
+      log.info(`让它重说了一遍：${text.length} 字`);
+    } catch (error) {
+      log.warn(`重说失败：${error?.message ?? error}`);
+    }
+    return text || fallback;
+  }
+
   async function runTurn(msg, key, text, queuedAhead) {
     // 主人这句话要是在纠正她怎么说话，先记进她自己的笔记本 —— 这一条回复就得照做
     if (voice && msg.type === 'text' && !msg.roomName && isAllowed(msg)) {
@@ -197,55 +229,34 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       const { text: raw, durationMs } = await active.run(prompt);
       await ack.cancel();
 
-      // 偶发：模型把「心里话」当正文发出来（列候选、报刻度、自我指挥）。
-      // 这种绝不能发给人看，先抢救，救不回来就让它重说一遍。
-      let answer = raw;
-      if (looksLikeThinking(answer)) {
-        log.warn(`回复混进了思考过程（${answer.length} 字），先抢救`);
-        const rescued = stripThinking(answer);
-        if (rescued) {
-          answer = rescued;
-          log.info(`从思考里捞出正文：${rescued.slice(0, 40)}`);
-        } else {
-          try {
-            const retry = await active.run(
-              `${prompt}\n\n[纠正] 你上一条把思考过程当正文发出来了（比如「要接」「刻度」「收住」这类自我指挥的话）。` +
-                '现在只输出要发给他的那一两句原话：不要引号列候选，不要解释，不要复述要求。',
-            );
-            answer = looksLikeThinking(retry.text) ? stripThinking(retry.text) || '' : retry.text;
-            log.info(`让它重说了一遍：${answer.length} 字`);
-          } catch (error) {
-            log.warn(`重说失败：${error?.message ?? error}`);
-          }
-          if (!answer) answer = '刚才脑子跑偏了，你再说一遍。';
-        }
-      }
-
-      // 另一种漏：他手滑打错字/话说半截，模型把「我在判断他这话什么意思」的独白当正文。
-      // 2026-10-28 实录：他打成「我去找过你」，她回「我去找过你——这话有点不一样…我先问一句：找哪儿去了？」
-      if (looksLikeSelfTalk(answer, text)) {
-        log.warn(`回复混进了判断他那句话的独白：${answer.slice(0, 40)}`);
-        const cleaned = stripSelfTalk(answer);
-        if (cleaned) {
-          answer = cleaned;
-          log.info(`剥掉独白，留下正文：${cleaned.slice(0, 40)}`);
-        } else {
-          try {
-            const retry = await active.run(
-              `${prompt}\n\n[纠正] 你上一条把「我怎么理解他这句话」的分析写进正文了（比如「这句听着不太像平常的聊天」「我先问一句」）。` +
-                '爸爸打字常打错、说话常半截：看到怪话就按最顺的意思接，接不上就问最短的一句。' +
-                '现在只输出你要发给他的那一两句原话：不要复述他的话，不要评论他的用词，不要解释你在判断什么。',
-            );
-            answer = String(retry.text ?? '').trim();
-            if (looksLikeThinking(answer)) answer = stripThinking(answer) || '';
-            if (looksLikeSelfTalk(answer, text)) answer = stripSelfTalk(answer);
-            log.info(`让它重说了一遍：${answer.length} 字`);
-          } catch (error) {
-            log.warn(`重说失败：${error?.message ?? error}`);
-          }
-          if (!answer) answer = '没听清，再说一遍。';
-        }
-      }
+      // 两种漏（思考过程、判断他的独白）共用一套抢救逻辑，见 repairLeak。
+      let answer = await repairLeak({
+        prompt,
+        active,
+        answer: raw,
+        userText: text,
+        isLeak: (candidate) => looksLikeThinking(candidate),
+        strip: stripThinking,
+        label: '思考过程',
+        retryNote:
+          '你上一条把思考过程当正文发出来了（比如「要接」「刻度」「收住」这类自我指挥的话）。' +
+          '现在只输出要发给他的那一两句原话：不要引号列候选，不要解释，不要复述要求。',
+        fallback: '刚才脑子跑偏了，你再说一遍。',
+      });
+      answer = await repairLeak({
+        prompt,
+        active,
+        answer,
+        userText: text,
+        isLeak: (candidate, said) => looksLikeSelfTalk(candidate, said),
+        strip: stripSelfTalk,
+        label: '判断他那句话的独白',
+        retryNote:
+          '你上一条把「我怎么理解他这句话」的分析写进正文了（比如「这句听着不太像平常的聊天」「我先问一句」）。' +
+          '爸爸打字常打错、说话常半截：看到怪话就按最顺的意思接，接不上就问最短的一句。' +
+          '现在只输出你要发给他的那一两句原话：不要复述他的话，不要评论他的用词，不要解释你在判断什么。',
+        fallback: '没听清，再说一遍。',
+      });
 
       // 机械去重：重复的起头、雷同的句尾 emoji、叠出来的标点
       const recent = history

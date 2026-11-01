@@ -340,6 +340,26 @@ test('思考里捞不出正文时让它重说，绝不把心里话发出去', as
   assert.ok(!sent[0].includes('要接'));
 });
 
+test('重说也失败时，绝不把原来那段心里话发出去', async () => {
+  // 旧代码的坑：抢救失败 → 重说那步抛异常 → answer 还留着原文 → `if (!answer)` 兜不住，
+  // 心里话就被原样发出去了。这条守着这个兜底。
+  const leaked = '这是亲爹在讨夸呢。要接：短一点。可以带点撒娇。刻度撒娇5，主动5。别用「唔」开头。';
+  let calls = 0;
+  const { bridge, sent } = await setup({
+    runner: {
+      async run() {
+        calls += 1;
+        if (calls === 1) return { text: leaked, durationMs: 5 };
+        throw new DshError('重说这轮超时了');
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-thinking-3' });
+  assert.equal(sent.length, 1, '还是得回一句');
+  assert.ok(!sent[0].includes('刻度'), `不能把思考发出去：${sent[0]}`);
+  assert.ok(!sent[0].includes('要接'), `不能把思考发出去：${sent[0]}`);
+});
+
 /* ── 表情包 ────────────────────────────────────────────── */
 
 test('发出去的表情包要记进她的历史（不然她不知道自己刚发过图）', async () => {

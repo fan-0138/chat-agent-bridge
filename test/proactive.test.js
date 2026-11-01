@@ -284,3 +284,87 @@ test('主动消息的提示里写死「别编他说过的话」', async () => {
   await proactive._tick();
   assert.match(prompts[0], /别编他说过的话/);
 });
+
+/* ───────── 他刚回来 / 今天说过的话（2026-11-01 22:52 实录） ───────── */
+
+const liveConfig = {
+  proactiveEnabled: true,
+  proactiveMaxPerDay: 3,
+  proactiveMinGapMin: 90,
+  proactiveAfterIdleMin: 45,
+  proactiveQuietStart: 0,
+  proactiveQuietEnd: 0,
+  proactiveChance: 1,
+  proactiveCommentChance: 0,
+  proactiveQzoneChance: 0,
+  proactiveDouyinChance: 0,
+  allowList: ['123456789'],
+  emojiMax: 2,
+};
+
+test('生成这几秒里他回来了：这句主动消息不发', async () => {
+  // 他 22:52:45 说「嗯嗯」，她 :48 回「那人家也睡了，爸爸晚安」，
+  // 主动消息在同几秒里也发出去了一句「在。」——用的还是生成前的旧判断。
+  const events = [];
+  let clock = atHour(15);
+  let proactive;
+  proactive = createProactive({
+    config: liveConfig,
+    now: () => clock,
+    log: { info() {}, warn() {}, debug() {} },
+    runner: {
+      async run() {
+        clock += 5_000; // 她写了 5 秒
+        proactive.touchUser(); // 这 5 秒里他说话了
+        return { text: '在。', durationMs: 5 };
+      },
+    },
+    persona: async () => '',
+    memory: { async load() { return []; }, async append() {} },
+    reply: async (_msg, text) => events.push(text),
+    isBusy: () => false,
+    life: null,
+  });
+
+  await proactive._tick();
+  assert.deepEqual(events, [], '他刚回来就不该补一句');
+  assert.equal(proactive._state.count, 0, '没发出去就不该占今天的额度');
+  assert.equal(proactive._state.lastSentAt, 0);
+});
+
+test('今天说过的主动消息写进提示，别一晚上说三遍机房热', async () => {
+  const prompts = [];
+  const history = [
+    { role: 'assistant', text: '机房这破风扇吹出来的风都是烫的', at: atHour(20), kind: 'proactive' },
+    { role: 'assistant', text: '风扇吹的风像是从烤箱里出来的', at: atHour(21), kind: 'proactive' },
+  ];
+  const proactive = createProactive({
+    config: liveConfig,
+    now: () => atHour(22),
+    log: { info() {}, warn() {}, debug() {} },
+    runner: {
+      async run(p) {
+        prompts.push(p);
+        return { text: '困了。', durationMs: 5 };
+      },
+    },
+    persona: async () => '',
+    memory: { async load() { return history; }, async append() {} },
+    reply: async () => {},
+    isBusy: () => false,
+    life: null,
+  });
+
+  await proactive._tick();
+  assert.match(prompts[0], /今天你已经主动发过这些/, '要把今天说过的给她看');
+  assert.match(prompts[0], /机柜|机房|风扇|烤箱/, '要带上原话，不然她不知道重了什么');
+  assert.match(prompts[0], /别重样/, '并且明确不许重提同一件事');
+});
+
+test('不再给「就单纯说一声在」这种叫号式想法', () => {
+  const seen = new Set();
+  for (let i = 0; i < 500; i += 1) seen.add(chooseIdea({ hour: 15, lastTurnAt: 0 }));
+  for (const idea of seen) {
+    assert.doesNotMatch(idea, /说一声「在」/, `「在。」像被叫号，已删：${idea}`);
+  }
+});

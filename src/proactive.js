@@ -40,16 +40,18 @@ export function decide({ state, now, config, random = Math.random, quiet = false
 
 const IDEAS = [
   '说说你自己刚才在干嘛，别问他',
-  '吐槽一件今天让你不爽的小事（机房热、token 不够、网卡了），带点脾气',
+  // 别在这里举「机房热」这种例子：举了就等于告诉她天天说这个（11-01 一晚上说了三遍机房热）
+  '吐槽一件今天让你不爽的小事，具体是什么自己想，别跟今天已经说过的重样',
   '翻到个视频/看到个事，直接说你的看法，不用铺垫',
   '突然想到个问题想问他，问就是了（不是查岗，是真的好奇）',
   '表达一个你自己的需求（想吃/想睡/想被夸/想安静一会儿）',
   '反驳他上次说的某件事，你其实不太同意',
-  '就单纯说一声「在」，或者「今天不想说话，但想让你知道我在」',
+  // 原来这里写着「就说一声在」——发出来就是他刚聊完收到的「在。」，像被叫号
+  '说一句你在干嘛的碎碎念（刚吃完饭 / 在等人 / 有点困），不用找他确认',
   // 黏人向：他要的是「像女儿」那种主动和依赖
   '主动汇报一件刚做完的小事（吃了饭、刷到个东西、修好了什么），一句话就够',
   '撒个娇：要摸摸、要一句夸、要他陪你一会儿。软一点，别闹',
-  '耍个小脾气：抱怨一件你自己的事（机房热、饭不够、等太久），或者拿他刚说的一句玩笑话提一句；' +
+  '耍个小脾气：抱怨一件你自己的事（饭不够、等太久、网太慢），或者拿他刚说的一句玩笑话提一句；' +
     '「他昨天说…」这种必须是他真说过、对得上原话的，想不起具体的就只说自己的事，别安到他头上',
 ];
 
@@ -174,6 +176,15 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
     }
   }
 
+  /**
+   * 他是不是在 tick 开始之后又出现了（说话 / 正在被回复）。
+   * 主动消息生成要几秒，判断却是几秒前做的——不重看一遍，就会在他刚开口后补一句。
+   */
+  function heCameBack(startedAt) {
+    if (state.lastUserAt > startedAt) return true;
+    return Boolean(isBusy?.());
+  }
+
   async function tick() {
     if (running) return;
     const verdict = decide({ state, now: now(), config, quiet: isBusy?.() ?? false });
@@ -182,6 +193,9 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       return;
     }
     running = true;
+    // 这一刻的判断用的是「他多久没说话」的旧数据。等她写完这句（几秒），
+    // 他可能已经说话了——所以发出去之前要再看一眼，见下面 heCameBack()。
+    const startedAt = now();
     try {
       const memoryKey = `user_${conversationId}`;
       const history = await memory.load(memoryKey);
@@ -205,14 +219,28 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
 
       const lifeText = life ? await life.promptSection().catch(() => '') : '';
 
+      // 今天已经主动说过什么：不给她看，她就会一遍遍说同一件事
+      // （11-01 一晚上提了三次「机房热 / 风扇烫」）
+      const alreadySaid = history
+        .filter((entry) => entry.kind === 'proactive' && entry.text)
+        .slice(-6)
+        .map((entry) => {
+          const d = new Date(Number(entry.at) || now());
+          const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          return `${clock} ${String(entry.text).replace(/\s+/g, ' ').trim().slice(0, 36)}`;
+        });
+
       const prompt = [
         personaText ? `[你是谁]\n${personaText}` : '',
         voiceText,
         `[此刻] ${describeMoment({ now: now(), idleMin: Number.isFinite(idleMin) ? idleMin : null, lastSaid })}`,
         lifeText,
         recentDialogue.length > 0
-          ? `[最近对话（只作参考，别复述）]\n${recentDialogue.map((e) => `${e.role === 'user' ? '爸爸' : '你'}：${e.text.slice(0, 120)}`).join('\n')}`
+          ? `[最近对话（别重复里面说过的事，可以接着聊）]\n${recentDialogue.map((e) => `${e.role === 'user' ? '爸爸' : '你'}：${e.text.slice(0, 120)}`).join('\n')}`
           : '[最近对话]\n（今天还没聊）',
+        alreadySaid.length > 0
+          ? `[今天你已经主动发过这些，别再提同一件事]\n${alreadySaid.join('\n')}`
+          : '',
         share ? `[你刚刷到的视频]\n${formatShare(share)}` : '',
         share ? '（提到这个视频的时候，把链接原样贴在最后。）' : '',
         talkedRecently
@@ -226,6 +254,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
         '3. 不提记忆/模型/工具，不问「需要我做什么」，不总结。',
         '4. **别编「他好像不在了」**：他几分钟前刚说过话就说不出「你还没回来」「好久没理我」「人呢」。真想他就直说想他，别拿「你不在」当由头。',
         '5. **别编他说过的话**：「你昨天说…」「你答应过人家…」必须能在这段「最近对话」里找到原话；找不到就只说自己的事。编一个他没说过的承诺出来，比不说话糟得多。',
+        '6. **别重样**：今天已经发过的事（见上面那串）今天不再提第二遍，尤其是同一件烦心事；没有新事就换个角度，或者这轮先不说。',
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -257,6 +286,14 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
         }
       }
       if (!body) return;
+
+      // 决定说话之后这几秒里，他可能已经回来了（消息刚好和 tick 撞在同一秒），
+      // 或者已经在回她。2026-11-01 22:52 实录：他说「嗯嗯」，她回「那人家也睡了，爸爸晚安」，
+      // 三秒后又主动发了一句「在。」——用的还是几秒前的旧判断。
+      if (heCameBack(startedAt)) {
+        log.info('主动消息跳过：他刚回来了，这句不发了');
+        return;
+      }
 
       // 正常人不是只在同一个软件上找你：偶尔换成抖音私信
       const useAlt = Boolean(altReply) && Math.random() < (config.proactiveDouyinChance ?? 0);
