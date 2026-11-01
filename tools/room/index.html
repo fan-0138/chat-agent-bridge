@@ -53,6 +53,38 @@
   .stage.house .vignette { background: radial-gradient(ellipse at 50% 46%, rgba(6, 8, 14, 0) 62%, rgba(6, 8, 14, .26) 100%); }
   .stage.house.asleep .room { filter: brightness(.86) saturate(.95); }
   .stage.house.asleep .vignette { background: radial-gradient(ellipse at 34% 60%, rgba(6, 8, 14, 0) 36%, rgba(6, 8, 14, .4) 100%); }
+  /* ── 家具热区：点一下她会过去做点什么 ── */
+  #hotspots { position: absolute; inset: 0; z-index: 7; }
+  .hotspot {
+    position: absolute; border: 0; padding: 0; background: transparent;
+    border-radius: 10px; cursor: pointer;
+    transition: background .15s, box-shadow .15s;
+  }
+  .hotspot:hover, .hotspot:focus-visible {
+    background: rgba(255, 255, 255, .07);
+    box-shadow: inset 0 0 0 1.5px rgba(140, 190, 255, .5), 0 0 24px rgba(110, 168, 255, .15);
+    outline: none;
+  }
+  .hotspot::after {
+    content: attr(data-label);
+    position: absolute; left: 50%; top: -24px; transform: translateX(-50%);
+    font-size: 11px; color: #dbe8ff; background: rgba(12, 18, 34, .88);
+    border: 1px solid rgba(140, 170, 255, .3); border-radius: 999px;
+    padding: 2px 9px; opacity: 0; transition: opacity .15s; pointer-events: none;
+    white-space: nowrap;
+  }
+  .hotspot:hover::after { opacity: 1; }
+  #hint {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+    z-index: 9; font-size: 12px; color: rgba(220, 232, 255, .85);
+    background: rgba(10, 15, 26, .62); border: 1px solid rgba(140, 170, 255, .25);
+    border-radius: 999px; padding: 6px 14px; pointer-events: none;
+    transition: opacity 1s ease;
+  }
+  /* 关灯：把房间压暗一点（她自己会去按开关） */
+  .stage.lights-off .room { filter: brightness(.62) saturate(.85); }
+  .stage.house.lights-off .room { filter: brightness(.8) saturate(.92); }
+
   .house-credit {
     position: absolute; right: 10px; bottom: 8px; z-index: 9;
     font-size: 10px; letter-spacing: .5px; color: rgba(210, 225, 255, .42);
@@ -164,6 +196,9 @@
       <div class="zzz">z z z</div>
     </div>
 
+    <div id="hotspots"></div>
+    <div id="hint">点房间里的家具，她会自己过去</div>
+
     <div class="hud">
       <div class="card identity">
         <div class="name">小鲸 <span class="nick">机器人账号 · 第七机房 · 靠窗第二个机柜</span></div>
@@ -203,6 +238,7 @@
     feetAt,
     pickStroll,
     SPRITE_BASE_HEIGHT,
+    HOTSPOTS,
   } = FLOOR;
 
   const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -276,6 +312,10 @@
   let strolling = false;
   let sleeping = false;
   let nextStrollAt = Date.now() + 9000;
+  let interactUntil = 0;      // 家具交互进行到什么时候（期间不自动切场景）
+  let interactLabel = '';
+  let manualBubble = '';
+  let manualBubbleUntil = 0;
   let epoch = 0;              // 每次取消当前动作 +1；异步流程用它对表
   let facing = 1;
   let lastState = null;
@@ -540,12 +580,62 @@
     }
   }
 
+  /* ────────── 家具交互：点一下，她自己过去 ────────── */
+
+  function say(text, ms = 6000) {
+    manualBubble = text;
+    manualBubbleUntil = Date.now() + ms;
+  }
+
+  async function interactFurniture(spot) {
+    if (!spot) return;
+    cancelActivity();
+    const myEpoch = epoch;
+    busy = true;
+    sleeping = false;
+    stageEl.classList.remove('asleep');
+    shadow.style.opacity = '';
+
+    // 灯：走过去也够不到，直接按开关
+    if (spot.lamp) {
+      stageEl.classList.toggle('lights-off');
+      say(stageEl.classList.contains('lights-off') ? '关灯，省点电' : '开灯，继续干活');
+      interactLabel = '灯';
+      interactUntil = Date.now() + 9000;
+      busy = false;
+      tick();
+      return;
+    }
+
+    const points = planTo(spot.node);
+    if (points) {
+      setClip(WALK_SRC, { restart: true });
+      const ok = await walkPoints(points);
+      if (!ok || epoch !== myEpoch) return;
+      currentNode = spot.node;
+    }
+    if (epoch !== myEpoch) return;
+
+    her.dataset.scene = spot.clip;
+    setClip(CLIPS[spot.clip] ?? CLIPS.idle);
+    const lines = spot.lines ?? [];
+    say(lines[Math.floor(Math.random() * lines.length)] ?? '……');
+    interactLabel = spot.label;
+    interactUntil = Date.now() + 18000 + Math.random() * 12000;
+    sceneNow = null;
+    busy = false;
+    tick();
+  }
+
   /* ────────── 画面/HUD ────────── */
 
-  function paintHud(state, scene, emote) {
+  function paintHud(state, scene, emote, doingText = '') {
     const reacting = Boolean(emote);
     const doing = document.getElementById('doing');
-    if (scene === 'sleep' && !reacting) {
+    if (doingText) {
+      doing.className = 'doing';
+      doing.innerHTML = doingText;
+    } else if (scene === 'sleep' && !reacting) {
       doing.className = 'doing asleep';
       doing.innerHTML = `此刻：<b>睡着了</b>${state.bedtime ? ' · 夜深了，别吵她' : ' · 缩在床上打盹'}`;
     } else {
@@ -588,11 +678,13 @@
       recent.appendChild(span);
     }
 
-    bubbleEl.textContent = scene === 'sleep' && !reacting
-      ? ''
-      : reacting && !FORCED_EMOTE
-        ? state.emote.reason
-        : state.latest?.text ?? '';
+    bubbleEl.textContent = Date.now() < manualBubbleUntil
+      ? manualBubble
+      : scene === 'sleep' && !reacting
+        ? ''
+        : reacting && !FORCED_EMOTE
+          ? state.emote.reason
+          : state.latest?.text ?? '';
   }
 
   function paint(state) {
@@ -624,6 +716,17 @@
         roomBg.dataset.night = String(nightNow);
         roomBg.src = nightNow ? '/assets/hut-night.webp' : '/assets/hut-day.webp';
       }
+    }
+
+    // 家具交互中：只刷新 HUD/气泡，不自动切场景（交互结束再回去干活）
+    if (interactUntil && now >= interactUntil) {
+      interactUntil = 0;
+      interactLabel = '';
+      sceneNow = null;
+    }
+    if (now < interactUntil) {
+      paintHud(state, her.dataset.scene || scene, null, `此刻：在<b>${esc(interactLabel)}</b>那边`);
+      return;
     }
 
     paintHud(state, scene, emote);
@@ -693,6 +796,24 @@
     credit.hidden = false;
     credit.textContent = '小屋素材：dsh-in-home · 星主（MIT）';
   }
+
+  // 家具热区：点一下她会走过去做点什么
+  const hotspotLayer = document.getElementById('hotspots');
+  for (const spot of HOTSPOTS ?? []) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hotspot';
+    btn.dataset.label = spot.label;
+    btn.title = spot.label;
+    btn.style.left = `${spot.left}%`;
+    btn.style.top = `${spot.top}%`;
+    btn.style.width = `${spot.w}%`;
+    btn.style.height = `${spot.h}%`;
+    btn.addEventListener('click', () => void interactFurniture(spot));
+    hotspotLayer.appendChild(btn);
+  }
+  const hintEl = document.getElementById('hint');
+  if (hintEl) setTimeout(() => { hintEl.style.opacity = '0'; }, 9000);
 
   // 开屏先站在地毯中间，然后自己走到该去的地方
   if (AT) {

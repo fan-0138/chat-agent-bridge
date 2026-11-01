@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SCENES } from '../tools/room/scene.mjs';
 import {
+  HOTSPOTS,
   NODES,
   EDGES,
   WANDER,
@@ -88,6 +89,17 @@ test('house：路长和毫秒数一致，走路不会瞬移', () => {
   assert.ok(Math.abs(total - pathLength(keys)) < 1e-9);
   const mid = pointOnPoints(keys.map((key) => NODES[key]), total / 2);
   assert.ok(mid.x > 0 && mid.x < 100 && mid.bottom > 0 && mid.bottom < 100);
+});
+
+test('house：家具热区都在画面里，节点和动作都存在', () => {
+  assert.ok(HOTSPOTS.length >= 5, '至少要有几个能点的家具');
+  for (const spot of HOTSPOTS) {
+    assert.ok(spot.left >= 0 && spot.top >= 0 && spot.left + spot.w <= 100 && spot.top + spot.h <= 100, `${spot.label} 热区出画面了`);
+    if (!spot.lamp) {
+      assert.ok(NODES[spot.node], `${spot.label} 没有落脚点`);
+      assert.ok(SCENES.includes(spot.clip), `${spot.label} 的动作不存在`);
+    }
+  }
 });
 
 test('house：闲逛不会挑床', () => {

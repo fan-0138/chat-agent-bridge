@@ -43,6 +43,7 @@ export const NODES = {
 
   // ── 闲逛用的落脚点 ──
   bedSide: at(620, 470), // 床前（上床/下床的踏板）
+  shelfF: at(700, 470), // 书架前
   leftF: at(520, 600), // 左前地板
   frontL: at(620, 660), // 最前偏左
   center: at(820, 620), // 中间
@@ -61,6 +62,9 @@ export const EDGES = [
   ['bedSide', 'yawn'],
   ['bedSide', 'leftF'],
   ['bedSide', 'stretch'],
+  ['bedSide', 'shelfF'],
+  ['shelfF', 'yawn'],
+  ['shelfF', 'stretch'],
   // 左前
   ['leftF', 'frontL'],
   ['leftF', 'rubik'],
@@ -92,6 +96,26 @@ export const EDGES = [
   ['rugF', 'eat'],
   ['eat', 'hum'],
   ['hum', 'center'],
+];
+
+/**
+ * 可点的家具热区（百分比，相对小屋图：left/top/width/height）。
+ * 点一下她会走过去、做对应动作、冒一句话。
+ */
+export const HOTSPOTS = [
+  { id: 'bed', label: '床', node: 'sleep', clip: 'sleep', left: 27.6, top: 29.9, w: 24, h: 31,
+    lines: ['床…人家先躺一会儿', '被子是凉的，正好'] },
+  { id: 'desk', label: '梳妆台', node: 'work', clip: 'work', left: 58, top: 39, w: 18, h: 24,
+    lines: ['改两个 bug 就回来', '桌子有点矮，垫本书'] },
+  { id: 'shelf', label: '书架', node: 'shelfF', clip: 'think', left: 48, top: 18, w: 10, h: 38,
+    lines: ['这本书上回夹了张书签', '翻两页就走神了'] },
+  { id: 'window', label: '窗', node: 'window', clip: 'window', left: 63, top: 22, w: 13, h: 30,
+    lines: ['外面的月亮比机房的灯好看'] },
+  { id: 'rug', label: '地毯', node: 'eat', clip: 'idle', left: 65, top: 69, w: 19, h: 17,
+    lines: ['坐一会儿，摸个鱼'] },
+  { id: 'rabbit', label: '兔兔', node: 'bedSide', clip: 'hum', left: 23.5, top: 50, w: 7, h: 13,
+    lines: ['兔兔今天也辛苦了'] },
+  { id: 'lamp', label: '灯', lamp: true, left: 73.4, top: 18, w: 7, h: 18, lines: [] },
 ];
 
 /** 闲逛去得最多的几个点（床不在里面）。 */

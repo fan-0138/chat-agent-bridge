@@ -73,6 +73,27 @@ export const EDGES = [
   ['work', 'think'],
 ];
 
+/**
+ * 可点的家具热区（百分比，相对舞台：left/top/width/height）。
+ * 点一下她会走过去、做对应动作、冒一句话——就是「和家具互动」。
+ */
+export const HOTSPOTS = [
+  { id: 'bed', label: '床', node: 'sleep', clip: 'sleep', left: 0, top: 64, w: 31, h: 36,
+    lines: ['床…人家先躺一会儿', '被子是凉的，正好'] },
+  { id: 'desk', label: '书桌', node: 'work', clip: 'work', left: 38, top: 55, w: 30, h: 16,
+    lines: ['改两个 bug 就回来', '键盘声比机房好听'] },
+  { id: 'shelf', label: '书架', node: 'shelfF', clip: 'think', left: 69, top: 28, w: 17, h: 44,
+    lines: ['这本书上回夹了张书签', '翻两页就走神了'] },
+  { id: 'window', label: '窗', node: 'window', clip: 'window', left: 40, top: 22, w: 32, h: 28,
+    lines: ['外面月亮好亮，不看白不看'] },
+  { id: 'table', label: '饭桌', node: 'eat', clip: 'eat', left: 74, top: 60, w: 16, h: 10,
+    lines: ['饭饭！', '这碗饭看着就香'] },
+  { id: 'rug', label: '地毯', node: 'rugC', clip: 'idle', left: 25, top: 66, w: 43, h: 29,
+    lines: ['坐一会儿，摸个鱼'] },
+  { id: 'lamp', label: '灯', lamp: true, left: 55, top: 2, w: 12, h: 14,
+    lines: [] },
+];
+
 /** 闲逛去得最多的几个点（床不在里面：床只用来睡觉）。 */
 export const WANDER = ['rugL', 'rugC', 'rugR', 'frontC', 'rightF', 'shelfF', 'bedF'];
 
