@@ -1,0 +1,169 @@
+"""
+「睡觉特写」的建模 + 出图（在已经打开的 room_v13.blend 里跑）。
+
+做三件事：
+  1. 加一台床边相机 camSleep（机位固定，页面按这台相机算百分比坐标）
+  2. 建一条有人形的被子 duvet（肩膀鼓、腿那边低、带布褶、四边垂到床外）
+  3. 出两张同机位的图：
+       /tmp/blroom/bed-bg.png      空床（含枕头/床架/房间）
+       /tmp/blroom/bed-duvet.png   只有被子，透明底（页面叠上去做呼吸/翻身）
+
+跑法（Blender GUI + addon 在 9876）：
+    python3 ~/Documents/deepseek/blender-mcp/mcpctl.py exec tools/room/blender/build_sleep.py
+
+之后还要两步（在外面跑）：
+    # 被子压蓝一点（Blender 的白布被台灯打爆了）
+    python3 tools/room/blender/tint_duvet.py
+    # 从 sleep.webm 抠她的睡脸（VP9 的 alpha 要用 libvpx-vp9 解码才拿得到）
+    python3 tools/room/blender/make_sleep_head.py
+"""
+
+import bpy
+import math
+from mathutils import Vector
+from bpy_extras.object_utils import world_to_camera_view
+
+scene = bpy.context.scene
+
+
+def look_at(cam, target):
+    d = (Vector(target) - cam.location).normalized()
+    cam.rotation_euler = d.to_track_quat('-Z', 'Y').to_euler()
+
+
+def smoothstep(e0, e1, x):
+    t = max(0.0, min(1.0, (x - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
+
+
+# ── 1. 床边相机 ──
+cam = bpy.data.objects.get('camSleep')
+if cam is None:
+    cam = bpy.data.objects.new('camSleep', bpy.data.cameras.new('camSleepData'))
+    scene.collection.objects.link(cam)
+cam.location = (-2.50, -3.02, 1.42)
+cam.data.lens = 30
+look_at(cam, (-2.56, -0.95, 0.42))
+scene.camera = cam
+
+# ── 2. 清掉这一帧里的杂物 ──
+for name in ('bed_blanket', 'cube_side', 'fl_base'):
+    ob = bpy.data.objects.get(name)
+    if ob:
+        ob.hide_render = True
+# 鲸鱼玩偶挪到床尾，别压在她身上
+for name in ('whale_body', 'whale_tail', 'whale_eye', 'whale_eye2', 'whale_fin'):
+    ob = bpy.data.objects.get(name)
+    if ob:
+        ob.location.x += 0.95
+
+# ── 3. 被子 ──
+old = bpy.data.objects.get('duvet')
+if old:
+    bpy.data.objects.remove(old, do_unlink=True)
+mesh = bpy.data.meshes.new('duvet')
+ob = bpy.data.objects.new('duvet', mesh)
+scene.collection.objects.link(ob)
+
+X0, X1 = -2.80, -1.24
+Y0, Y1 = -1.64, -0.26
+NX, NY = 160, 100
+TOP = 0.335
+verts, faces = [], []
+for i in range(NX + 1):
+    for j in range(NY + 1):
+        u, v = i / NX, j / NY
+        x = X0 + (X1 - X0) * u
+        y = Y0 + (Y1 - Y0) * v
+        z = TOP + 0.030
+
+        # 身体：肩 → 腰 → 腿，越往脚越平
+        shoulder = 0.22 * math.exp(-((x + 2.50) / 0.24) ** 2)
+        belly = 0.17 * math.exp(-((x + 2.14) / 0.32) ** 2)
+        legs = 0.11 * math.exp(-((x + 1.74) / 0.28) ** 2)
+        across = math.exp(-((y + 0.98) / 0.46) ** 4)
+        z += (shoulder + belly + legs) * across
+
+        # 头端压平（别糊成一堵墙）+ 翻折的被子口
+        z -= 0.075 * (1 - smoothstep(-2.80, -2.60, x))
+        z += 0.045 * math.exp(-((x + 2.575) / 0.045) ** 2) * smoothstep(-1.34, -0.52, y) * (1 - smoothstep(-0.46, -0.30, y))
+        z -= 0.07 * smoothstep(-1.48, -1.24, x)
+
+        # 褶子
+        z += 0.010 * math.sin((x + 2.0) * 23.0 + (y + 1.0) * 5.0) * (1 - across)
+        z += 0.007 * math.sin((y + 0.98) * 27.0 + 2.0 * math.sin(x * 3.0)) * (1 - across * 0.6)
+
+        # 垂到床外
+        if y < -1.50:
+            z -= 0.22 * smoothstep(-1.50, -1.64, y) ** 1.4
+        if y > -0.40:
+            z -= 0.22 * smoothstep(-0.40, -0.26, y) ** 1.4
+        z = max(0.08, z)
+        verts.append((x, y, z))
+
+for i in range(NX):
+    for j in range(NY):
+        a = i * (NY + 1) + j
+        faces.append((a, a + 1, a + NY + 2, a + NY + 1))
+mesh.from_pydata(verts, [], faces)
+mesh.update()
+
+mat = bpy.data.materials.get('duvet_fabric3') or bpy.data.materials.new('duvet_fabric3')
+mat.use_nodes = True
+bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+if bsdf:
+    bsdf.inputs['Base Color'].default_value = (0.30, 0.36, 0.50, 1.0)
+    bsdf.inputs['Roughness'].default_value = 1.0
+    if 'Specular IOR Level' in bsdf.inputs:
+        bsdf.inputs['Specular IOR Level'].default_value = 0.15
+    if 'Sheen Weight' in bsdf.inputs:
+        bsdf.inputs['Sheen Weight'].default_value = 0.25
+ob.data.materials.append(mat)
+
+sol = ob.modifiers.new('solid', 'SOLIDIFY')
+sol.thickness = 0.035
+sub = ob.modifiers.new('sub', 'SUBSURF')
+sub.levels = 1
+for poly in mesh.polygons:
+    poly.use_smooth = True
+
+# ── 4. 投影（页面里睡脸/被子按这些百分比摆） ──
+for label, co in [
+    ('pillow_center', (-2.92, -0.95, 0.46)),
+    ('duvet_head_edge', (-2.78, -0.95, 0.42)),
+    ('shoulder_top', (-2.52, -0.98, 0.60)),
+]:
+    p = world_to_camera_view(scene, cam, Vector(co))
+    print(f'PROJ {label}: x={p.x * 100:.2f}% y={(1 - p.y) * 100:.2f}%')
+
+# ── 5. 出图：空床 + 只有被子（透明） ──
+scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
+scene.cycles.samples = 96
+
+ob.hide_render = True
+scene.render.film_transparent = False
+scene.render.filepath = '/tmp/blroom/bed-bg.png'
+bpy.ops.render.render(write_still=True)
+print('rendered bed-bg.png')
+
+ob.hide_render = False
+for o in scene.objects:
+    if o is ob:
+        continue
+    if o.type in {'MESH', 'CURVE', 'SURFACE', 'FONT'}:
+        o.hide_render = True
+scene.render.film_transparent = True
+scene.render.image_settings.color_mode = 'RGBA'
+scene.render.filepath = '/tmp/blroom/bed-duvet.png'
+bpy.ops.render.render(write_still=True)
+print('rendered bed-duvet.png')
+
+for o in scene.objects:
+    if o.type in {'MESH', 'CURVE', 'SURFACE', 'FONT'}:
+        o.hide_render = False
+for name in ('bed_blanket', 'cube_side', 'fl_base'):
+    o = bpy.data.objects.get(name)
+    if o:
+        o.hide_render = True
+bpy.ops.wm.save_as_mainfile(filepath='/tmp/blroom/room_v13.blend')
+print('saved room_v13.blend')

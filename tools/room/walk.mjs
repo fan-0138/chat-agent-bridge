@@ -83,7 +83,8 @@ export const EDGES = [
  * 点一下她会走过去、做对应动作、冒一句话——就是「和家具互动」。
  */
 export const HOTSPOTS = [
-  { id: 'bed', label: '床', node: 'sleep', clip: 'sleep', left: 0, top: 64, w: 31, h: 36,
+  // 床：走到床沿（bedF）就上床，不是站在褥子上播片段；盖被子的特写在页面里
+  { id: 'bed', label: '床', node: 'bedF', clip: 'sleep', left: 0, top: 64, w: 31, h: 36,
     lines: ['床…人家先躺一会儿', '被子是凉的，正好'] },
   { id: 'desk', label: '书桌', node: 'work', clip: 'work', left: 38, top: 55, w: 30, h: 16,
     lines: ['改两个 bug 就回来', '键盘声比机房好听'] },

@@ -128,6 +128,64 @@
   #her[data-scene="sleep"] .zzz { opacity: .75; animation: floatz 3.2s ease-in-out infinite; }
   @keyframes floatz { 0% { transform: translate(0, 0); opacity: .2; } 50% { transform: translate(6px, -12px); opacity: .9; } 100% { transform: translate(12px, -24px); opacity: 0; } }
 
+  /* ── 睡觉特写 ──
+     三层都是同一个 Blender 机位（camSleep）渲的，所以按百分比叠就是严丝合缝：
+     空床背景 ← 被子（盖上来、呼吸、掀开）← 她的睡脸（从 sleep 片段里抠的）。 */
+  #sleepScene {
+    position: absolute; inset: 0; z-index: 2; pointer-events: none;
+    opacity: 0; visibility: hidden;
+    transition: opacity 1.2s ease, visibility 0s linear 1.2s;
+  }
+  #sleepScene.is-on { opacity: 1; visibility: visible; transition: opacity 1.2s ease; }
+  #sleepBg, #sleepDuvet { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #sleepDuvet {
+    opacity: 0; transform: translateY(11%) scale(1.03);
+    transform-origin: 50% 100%;
+    transition: transform 1.15s cubic-bezier(.22,.85,.28,1), opacity .85s ease;
+    will-change: transform, opacity;
+  }
+  #sleepScene.is-on #sleepDuvet {
+    opacity: 1; transform: none;
+    animation: duvet-breathe 5.6s ease-in-out 1.5s infinite;
+  }
+  @keyframes duvet-breathe {
+    0%, 100% { transform: translateY(0) scaleY(1); }
+    50%      { transform: translateY(-.35%) scaleY(1.006); }
+  }
+  #sleepHead {
+    position: absolute; left: 36.1%; top: 49.2%; width: 16.6%;
+    transform: translate(-50%, -50%) rotate(-9deg);
+    transform-origin: 50% 88%;
+    opacity: 0; transition: opacity .9s ease .5s;
+    filter: drop-shadow(0 8px 12px rgba(6, 10, 22, .4));
+  }
+  #sleepScene.is-on #sleepHead {
+    opacity: 1;
+    animation: head-breathe 5.6s ease-in-out 1.5s infinite;
+  }
+  @keyframes head-breathe {
+    0%, 100% { transform: translate(-50%, -50%) rotate(-9deg); }
+    50%      { transform: translate(-50%, -50.7%) rotate(-10.3deg); }
+  }
+  /* 偶尔翻个身：头转一下、被子跟着动 */
+  #sleepScene.is-turn #sleepHead { animation: head-turn 2.8s ease-in-out; }
+  @keyframes head-turn {
+    0%, 100% { transform: translate(-50%, -50%) rotate(-9deg); }
+    35%      { transform: translate(-52%, -50%) rotate(-15deg); }
+    70%      { transform: translate(-51%, -49.4%) rotate(-6deg); }
+  }
+  #sleepScene.is-turn #sleepDuvet { animation: duvet-turn 2.8s ease-in-out; }
+  @keyframes duvet-turn {
+    0%, 100% { transform: translate(0, 0) scaleY(1); }
+    40%      { transform: translateX(-.25%) scaleY(.998); }
+    75%      { transform: translateX(.2%) scaleY(1.002); }
+  }
+  #sleepZzz {
+    position: absolute; left: 44%; top: 36%; font-size: 13px; color: #b9cdff;
+    opacity: 0; transition: opacity 1s;
+  }
+  #sleepScene.is-on #sleepZzz { opacity: .8; animation: floatz 3.2s ease-in-out infinite; }
+
   /* ── 气泡 ── */
   .bubble {
     position: absolute; left: 50%; bottom: 64%;
@@ -187,6 +245,14 @@
   <div class="stage">
     <img class="room" id="roomBg" src="/assets/room-bg.png" alt="" />
     <div class="vignette"></div>
+
+    <!-- 睡觉特写：空床 ← 被子 ← 睡脸（同一机位的三层，见 #sleepScene 的样式注释） -->
+    <div id="sleepScene" aria-hidden="true">
+      <img id="sleepBg" src="/assets/bed-bg.png" alt="" />
+      <img id="sleepDuvet" src="/assets/bed-duvet.png" alt="" />
+      <img id="sleepHead" src="/assets/sleep-head.png" alt="小鲸睡着了" />
+      <div id="sleepZzz">z z z</div>
+    </div>
 
     <div id="herShadow"></div>
     <div class="bubble" id="bubble"></div>
@@ -327,6 +393,62 @@
   let facing = 1;
   let lastState = null;
   const demoStart = Date.now();
+
+  /* ────────── 睡觉特写：上床 → 盖被 → 呼吸 → 翻身 → 掀被起床 ────────── */
+
+  const sleepSceneEl = document.getElementById('sleepScene');
+  const hintNode = document.getElementById('hint');   // 页尾还有一份 hintEl（9 秒后淡出那条），别重名
+  const HINT_TEXT = hintNode.textContent;
+  // 仓库里不同步 assets/：床边特写的图不在就退回旧的打盹片段，别让床变成一块空白
+  const SLEEP_SCENE_OK = await new Promise((resolve) => {
+    const probe = new Image();
+    probe.onload = () => resolve(true);
+    probe.onerror = () => resolve(false);
+    probe.src = '/assets/bed-bg.png';
+  });
+  let inBed = false;       // 正在床边特写里睡着
+  let turnTimer = 0;
+  // 手动叫醒后这段时间内不再自动躺回去（夜里状态一直说「在睡」，不然刚睁眼又被塞回被窝）
+  let wakeHoldUntil = 0;
+
+  /** 走到床边后调：画面切到床边，被子盖上来，睡脸露在枕头上 */
+  async function tuckIn() {
+    if (inBed) return;
+    inBed = true;
+    sleeping = true;
+    stageEl.classList.add('asleep');
+    shadow.style.opacity = '0';
+    // 立绘淡出（她躺进被子里了），剩下枕头上那张睡脸
+    her.style.transition = 'opacity .5s ease';
+    her.style.opacity = '0';
+    sleepSceneEl.classList.add('is-on');
+    hintNode.textContent = '点一下叫她起来';
+    hintNode.style.opacity = '1';
+    clearInterval(turnTimer);
+    turnTimer = setInterval(() => {
+      if (!inBed) return;
+      sleepSceneEl.classList.add('is-turn');
+      setTimeout(() => sleepSceneEl.classList.remove('is-turn'), 3000);
+    }, 22000 + Math.random() * 20000);
+  }
+
+  /** 掀被子起床：先把被子滑下去，再把人露出来 */
+  async function getUp({ manual = false } = {}) {
+    if (!inBed) return;
+    inBed = false;
+    if (manual) wakeHoldUntil = Date.now() + 10 * 60_000;
+    clearInterval(turnTimer);
+    sleepSceneEl.classList.remove('is-turn');
+    sleepSceneEl.classList.remove('is-on');
+    hintNode.textContent = HINT_TEXT;
+    hintNode.style.opacity = '0';   // 通用提示早该淡出了，别又冒出来
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    her.style.opacity = '';
+    her.style.transition = '';
+    sleeping = false;
+    stageEl.classList.remove('asleep');
+    shadow.style.opacity = '';
+  }
 
   /* ────────── 摆位置：left/bottom 百分比 + 透视缩放 ────────── */
 
@@ -539,11 +661,13 @@
     cancelActivity();
     const myEpoch = epoch;
     busy = true;
+    if (inBed) await getUp();   // 从床上起来再走（掀被子的过渡要播完）
     sleeping = false;
     stageEl.classList.remove('asleep');
     shadow.style.opacity = '';
 
-    const target = scene;
+    // 睡觉走的是床沿：不走床垫上那个点，免得人站在褥子上凭空消失
+    const target = scene === 'sleep' ? (NODES.bedF ? 'bedF' : NODES.bedSide ? 'bedSide' : scene) : scene;
     const points = planTo(target);
     if (points) {
       setClip(WALK_SRC, { restart: true });
@@ -554,11 +678,16 @@
     if (epoch !== myEpoch) return;
 
     if (scene === 'sleep') {
-      setClip(CLIPS.sleep);
       her.dataset.scene = 'sleep';
-      sleeping = true;
-      stageEl.classList.add('asleep');
-      shadow.style.opacity = '0'; // 她上床了，地上那摊影子就该消失
+      if (HOUSE || !SLEEP_SCENE_OK) {
+        // 小屋那套素材没有床边特写，还是坐着打盹
+        setClip(CLIPS.sleep);
+        sleeping = true;
+        stageEl.classList.add('asleep');
+        shadow.style.opacity = '0';
+      } else {
+        await tuckIn();
+      }
     } else {
       setClip(CLIPS[scene] ?? CLIPS.idle);
       her.dataset.scene = scene;
@@ -600,6 +729,22 @@
 
   async function interactFurniture(spot) {
     if (!spot) return;
+
+    // 睡着的时候点任何东西 = 叫她起来（先起床，这一下不干别的）
+    if (inBed) {
+      cancelActivity();
+      busy = true;
+      await getUp({ manual: true });
+      her.dataset.scene = 'idle';
+      setClip(CLIPS.stretch ?? CLIPS.idle);
+      say('唔…人家还没睡够');
+      sceneNow = null;
+      nextStrollAt = Date.now() + 12000;
+      busy = false;
+      tick();
+      return;
+    }
+
     cancelActivity();
     const myEpoch = epoch;
     busy = true;
@@ -652,6 +797,18 @@
       currentNode = spot.node;
     }
     if (epoch !== myEpoch) return;
+
+    // 床：不是"走过去坐一下"，是上床盖被子（小屋版没有这套特写，走老路）
+    if (spot.clip === 'sleep' && !HOUSE && SLEEP_SCENE_OK) {
+      her.dataset.scene = 'sleep';
+      await tuckIn();
+      const bedLines = spot.lines ?? [];
+      say(bedLines[Math.floor(Math.random() * bedLines.length)] ?? '晚安…');
+      sceneNow = 'sleep';
+      busy = false;
+      tick();
+      return;
+    }
 
     her.dataset.scene = spot.clip;
     setClip(CLIPS[spot.clip] ?? CLIPS.idle);
@@ -728,7 +885,9 @@
     lastState = state;
     const now = Date.now();
     const demoIdx = WALK_DEMO.length ? Math.floor((now - demoStart) / 4000) % WALK_DEMO.length : -1;
-    const scene = FORCED_SCENE || (demoIdx >= 0 ? WALK_DEMO[demoIdx] : null) || state.scene || 'idle';
+    let scene = FORCED_SCENE || (demoIdx >= 0 ? WALK_DEMO[demoIdx] : null) || state.scene || 'idle';
+    // 她刚被手动叫醒：状态还写着「在睡」，也先给她十分钟清醒，不然一睁眼又被塞回被窝
+    if (scene === 'sleep' && !FORCED_SCENE && Date.now() < wakeHoldUntil) scene = 'yawn';
 
     const emote = FORCED_EMOTE
       ? { clip: FORCED_EMOTE, key: `forced:${FORCED_EMOTE}`, reason: '', until: Infinity }
@@ -792,7 +951,7 @@
       return;
     }
 
-    if (!busy && !strolling && Date.now() >= nextStrollAt && scene !== 'sleep') {
+    if (!busy && !strolling && !inBed && Date.now() >= nextStrollAt && scene !== 'sleep') {
       void startStroll(scene);
     }
   }
