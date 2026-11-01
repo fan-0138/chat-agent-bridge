@@ -270,6 +270,9 @@
     stretch: '/assets/stretch.webm', // 超大伸懒腰（早上刚起）
     dance: '/assets/happy.webm',     // 可爱宅舞（被夸）
     sulk: '/assets/sulk.webm',       // 傲娇生气（被叫机器人账号）
+    outfit: '/assets/outfit.webm',   // 整体换装试色（点衣柜）
+    rack: '/assets/rack.webm',       // 清点归档（点机柜）
+    cook: '/assets/cook.webm',       // 涮火锅（点饭锅）
   };
 
   // 房间是 Blender 渲的透视图：站位、路点、透视缩放都在 walk.mjs 里
@@ -279,6 +282,8 @@
   const FORCE_STROLL = params.has('stroll');
   const WALK_DEMO = (params.get('walk') || '').split(',').filter(Boolean); // 调试：按顺序走一圈
   const NOWALK = params.has('nowalk'); // 调试：不播走路，直接站过去
+  const ROOM_BG_OPEN = '/assets/room-bg.png';
+  const ROOM_BG_CLOSED = '/assets/room-bg-curtain.png';
   const AT = params.get('at');         // 调试：?at=21.3,6 把她摆到指定点
   // 调试：?walkclip=float|ai|ai2|crab|run 换一段走路动作对比
   const WALK_ALIAS = {
@@ -312,6 +317,7 @@
   let strolling = false;
   let sleeping = false;
   let nextStrollAt = Date.now() + 9000;
+  let curtainsClosed = false;
   let interactUntil = 0;      // 家具交互进行到什么时候（期间不自动切场景）
   let interactLabel = '';
   let manualBubble = '';
@@ -595,6 +601,32 @@
     sleeping = false;
     stageEl.classList.remove('asleep');
     shadow.style.opacity = '';
+
+    // 窗帘：切一张「拉上窗帘」的渲染图
+    if (spot.curtain) {
+      curtainsClosed = !curtainsClosed;
+      roomBg.src = curtainsClosed ? ROOM_BG_CLOSED : ROOM_BG_OPEN;
+      say(curtainsClosed ? '拉上窗帘，屋里一下安静了' : '拉开看看月亮');
+      interactLabel = '窗帘';
+      interactUntil = Date.now() + 9000;
+      busy = false;
+      tick();
+      return;
+    }
+
+    // 站在原地的交互（够不到的机柜之类）：只播动作 + 冒一句
+    if (spot.stay) {
+      her.dataset.scene = spot.clip;
+      setClip(CLIPS[spot.clip] ?? CLIPS.idle);
+      const stayLines = spot.lines ?? [];
+      say(stayLines[Math.floor(Math.random() * stayLines.length)] ?? '……');
+      interactLabel = spot.label;
+      interactUntil = Date.now() + 15000 + Math.random() * 10000;
+      sceneNow = null;
+      busy = false;
+      tick();
+      return;
+    }
 
     // 灯：走过去也够不到，直接按开关
     if (spot.lamp) {

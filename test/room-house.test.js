@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { SCENES } from '../tools/room/scene.mjs';
 import {
   HOTSPOTS,
+  EXTRA_CLIPS,
   NODES,
   EDGES,
   WANDER,
@@ -95,9 +96,12 @@ test('house：家具热区都在画面里，节点和动作都存在', () => {
   assert.ok(HOTSPOTS.length >= 5, '至少要有几个能点的家具');
   for (const spot of HOTSPOTS) {
     assert.ok(spot.left >= 0 && spot.top >= 0 && spot.left + spot.w <= 100 && spot.top + spot.h <= 100, `${spot.label} 热区出画面了`);
-    if (!spot.lamp) {
+    if (!spot.lamp && !spot.stay && !spot.curtain) {
       assert.ok(NODES[spot.node], `${spot.label} 没有落脚点`);
-      assert.ok(SCENES.includes(spot.clip), `${spot.label} 的动作不存在`);
+      assert.ok(
+        SCENES.includes(spot.clip) || EXTRA_CLIPS.includes(spot.clip),
+        `${spot.label} 的动作不存在`,
+      );
     }
   }
 });

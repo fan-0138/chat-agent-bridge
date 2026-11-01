@@ -118,6 +118,9 @@ export const HOTSPOTS = [
   { id: 'lamp', label: '灯', lamp: true, left: 73.4, top: 18, w: 7, h: 18, lines: [] },
 ];
 
+/** 只在交互里用的动作（小屋这边暂时没有额外的，留空占位）。 */
+export const EXTRA_CLIPS = [];
+
 /** 闲逛去得最多的几个点（床不在里面）。 */
 export const WANDER = ['leftF', 'frontL', 'center', 'rugF', 'rugR', 'rightF', 'bedSide'];
 

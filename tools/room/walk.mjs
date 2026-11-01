@@ -41,6 +41,7 @@ export const NODES = {
   rightF: { x: 71.0, bottom: 6.0 }, // 地毯右边的地板
   shelfF: { x: 76.0, bottom: 16.0 }, // 书架前
   bedF: { x: 31.5, bottom: 8.0 }, // 床沿（上床/下床的唯一踏板）
+  wardrobe: { x: 35.4, bottom: 28.3 }, // 衣柜前（相机投影算出来的）
 };
 
 /**
@@ -71,6 +72,10 @@ export const EDGES = [
   ['shelfF', 'window'],
   ['window', 'hum'],
   ['work', 'think'],
+  // 衣柜
+  ['wardrobe', 'work'],
+  ['wardrobe', 'think'],
+  ['wardrobe', 'rugL'],
 ];
 
 /**
@@ -92,7 +97,20 @@ export const HOTSPOTS = [
     lines: ['坐一会儿，摸个鱼'] },
   { id: 'lamp', label: '灯', lamp: true, left: 55, top: 2, w: 12, h: 14,
     lines: [] },
+  { id: 'wardrobe', label: '衣柜', node: 'wardrobe', clip: 'outfit', left: 29.3, top: 28.1, w: 13.7, h: 41.2,
+    lines: ['换一身…这件还是那件', '衣柜里全是深蓝色，挑不出来'] },
+  { id: 'monitor', label: '显示器', node: 'work', clip: 'work', left: 44, top: 39, w: 14, h: 13,
+    lines: ['先把这个报错改掉', '屏幕亮着，人就得坐下'] },
+  { id: 'rack', label: '机柜', stay: true, clip: 'rack', left: 6.6, top: 30.3, w: 16.6, h: 42.9,
+    lines: ['机柜的风扇声，听着就安心', 'LED 闪得挺齐，没掉线'] },
+  { id: 'cooker', label: '饭锅', node: 'eat', clip: 'cook', left: 76, top: 60, w: 10, h: 9,
+    lines: ['饭还在焖，等两分钟', '今天的米放多了半杯'] },
+  { id: 'curtain', label: '窗帘', curtain: true, left: 37.5, top: 19, w: 4.5, h: 30,
+    lines: ['拉上窗帘，机房的光就照不进来了'] },
 ];
+
+/** 只在交互里用的动作（不是生活场景，所以不在 scene.mjs 里）。 */
+export const EXTRA_CLIPS = ['outfit', 'rack', 'cook'];
 
 /** 闲逛去得最多的几个点（床不在里面：床只用来睡觉）。 */
 export const WANDER = ['rugL', 'rugC', 'rugR', 'frontC', 'rightF', 'shelfF', 'bedF'];
