@@ -394,7 +394,7 @@ test('独白后面还有正经话时，只剥独白，不用重问', async () =>
 
 /* ── 她自己发的「刚刷到…」不占他的位置 ────────────────── */
 
-test('主动消息摘成一行摘要，别把他的话挤出历史', async () => {
+test('最近三条主动消息留在历史里，更早的才摘成一行', async () => {
   const prompts = [];
   const { bridge, memory } = await setup({
     runner: {
@@ -405,18 +405,64 @@ test('主动消息摘成一行摘要，别把他的话挤出历史', async () =>
     },
   });
   const key = 'user_wxid_alice';
-  await memory.append(key, 'assistant', '刚刷到个鲸鱼视频，人家又刷到了', { kind: 'proactive' });
+  await memory.append(key, 'assistant', '早上刷到个鲸鱼视频，人家又刷到了', { kind: 'proactive' });
+  await memory.append(key, 'assistant', '中午那条视频有点好笑', { kind: 'proactive' });
+  await memory.append(key, 'assistant', '下午这条是刚发的', { kind: 'proactive' });
+  await memory.append(key, 'assistant', '傍晚这条也是刚发的', { kind: 'proactive' });
   await memory.append(key, 'user', '这个前几天你给我看过了');
   await memory.append(key, 'assistant', '忘了，人家刷多了记串');
   await bridge.handle({ ...baseMsg, id: 'm-notes-1', text: '那你怎么没回人家' });
   const p = prompts[0];
-  assert.match(p, /你今天自己主动说过/, '应该单列一段「今天自己说过什么」');
   const histStart = p.indexOf('[历史对话');
   const notesStart = p.indexOf('[你今天自己主动说过');
   const hist = p.slice(histStart, notesStart);
-  assert.ok(!hist.includes('刚刷到个鲸鱼视频'), `主动消息不该占历史位：${hist.slice(-120)}`);
+  assert.ok(hist.includes('你（主动发的）'), '最近的主动消息要留在历史里');
+  assert.ok(hist.includes('傍晚这条也是刚发的'), '最近那条必须在历史里');
+  assert.ok(!hist.includes('早上刷到个鲸鱼视频'), `更早的主动消息别占历史位：${hist.slice(-160)}`);
   assert.ok(hist.includes('忘了，人家刷多了记串'), '真正的对话要在历史里');
-  assert.ok(p.slice(notesStart).includes('刚刷到个鲸鱼视频'), '摘要里要有，免得她又说一遍');
+  assert.match(hist, /\d\d:\d\d 你（主动发的）/, '历史里行首带时间');
+  assert.ok(p.slice(notesStart).includes('早上刷到个鲸鱼视频'), '摘要里要有更早那条，免得她又说一遍');
+});
+
+test('他隔了十几分钟回她刚主动发的那条：prompt 里点明这句在接什么', async () => {
+  const prompts = [];
+  const { bridge, memory } = await setup({
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '那人家明天就去搬凳子。', durationMs: 5 };
+      },
+    },
+  });
+  const key = 'user_wxid_alice';
+  await memory.append(key, 'assistant', '人家明天要从机柜里搬个小凳子坐过道去', { kind: 'proactive' });
+  await bridge.handle({ ...baseMsg, id: 'm-pro-2', text: '可以啊哈哈' });
+  assert.match(prompts[0], /分钟前刚主动给他发了/, '要告诉她这句是在回她刚主动发的那条');
+  assert.match(prompts[0], /小凳子/, '要带上那条的内容');
+});
+
+test('他回「可以啊哈哈」是在接她刚主动发的，不能把两小时前的话当上一轮', async () => {
+  const prompts = [];
+  const { bridge, memory } = await setup({
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '那人家明天就去搬凳子。', durationMs: 5 };
+      },
+    },
+  });
+  const key = 'user_wxid_alice';
+  await memory.append(key, 'user', '快入冬了小鲸，西瓜要少吃');
+  await memory.append(key, 'assistant', '那人家就吃一小块，不贪多。');
+  await memory.append(key, 'assistant', '人家明天要从机柜里搬个小凳子坐过道去', { kind: 'proactive' });
+  await bridge.handle({ ...baseMsg, id: 'm-pro-1', text: '可以啊哈哈' });
+  const p = prompts[0];
+  const hist = p.slice(p.indexOf('[历史对话'), p.indexOf('[当前消息]'));
+  assert.ok(hist.includes('你（主动发的）'), '她刚主动发的那条要在历史里，模型才知道「可以」是在同意这件事');
+  assert.ok(
+    hist.indexOf('小凳子') > hist.indexOf('吃一小块'),
+    '主动消息要排在两小时前的西瓜对话后面，不能倒过来',
+  );
 });
 
 test('notesFrom：只收主动消息，带时间，压到 30 字', () => {

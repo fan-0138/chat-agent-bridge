@@ -111,9 +111,18 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     }
 
     const history = await memory.load(key);
-    // 她自己主动发的（「刚刷到…」）单独摘出来：一天十来条，全塞进历史会把他刚说的话挤出去
-    const notes = notesFrom(history);
-    const dialogue = history.filter((entry) => entry.kind !== 'proactive');
+    // 她自己主动发的（「刚刷到…」）一天十来条，全塞进历史会把他刚说的话挤出去；
+    // 但最近几条得留在对话里：他常常就是回她刚主动发的那条（「可以啊哈哈」），
+    // 全摘成小字摘要后，模型会把更早的一条当「上一轮」，答得驴唇不对马嘴。
+    const PROACTIVE_IN_WINDOW = 3;
+    const proactiveSeen = new Set(
+      history
+        .map((entry, index) => (entry.kind === 'proactive' ? index : -1))
+        .filter((index) => index >= 0)
+        .slice(-PROACTIVE_IN_WINDOW),
+    );
+    const dialogue = history.filter((entry, index) => entry.kind !== 'proactive' || proactiveSeen.has(index));
+    const notes = notesFrom(history.filter((entry, index) => !(entry.kind === 'proactive' && proactiveSeen.has(index))));
     const personaText = persona ? await persona() : '';
     const voiceText = voice ? (await voice.load()).text : '';
     const slangText = slang ? (await slang.load()).text : '';
@@ -136,6 +145,18 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     const lastUserAt = [...dialogue].reverse().find((entry) => entry.role === 'user')?.at ?? 0;
     const gapMin = lastUserAt > 0 ? Math.round((Date.now() - lastUserAt) / 60_000) : 0;
     const extraLines = [];
+
+    // 他刚回的是她主动发的那条：明确告诉他这句话在接什么，别按两小时前的旧话答
+    const lastEntry = dialogue[dialogue.length - 1];
+    if (lastEntry?.kind === 'proactive' && lastEntry.at) {
+      const agoMin = Math.round((Date.now() - Number(lastEntry.at)) / 60_000);
+      if (agoMin >= 0 && agoMin <= 20) {
+        extraLines.push(
+          `[时间] 你 ${agoMin} 分钟前刚主动给他发了「${String(lastEntry.text).replace(/\s+/g, ' ').slice(0, 30)}」。` +
+            '他这句话大概率是在回这条，先顺着它接；如果确实不是，再按更早的对话接。',
+        );
+      }
+    }
     if (gapMin >= 5) {
       extraLines.push(
         `[时间] 他上一条消息是 ${gapMin} 分钟前发的，你隔了一会儿才回。别把时间说小（别说「才几分钟」），也别编理由。`,

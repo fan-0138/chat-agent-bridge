@@ -3,6 +3,12 @@
  * 因此把历史对话作为「参考资料」注入，并明确告诉模型当前渠道是微信还是 QQ。
  */
 
+function clockOf(at) {
+  const when = new Date(Number(at));
+  if (Number.isNaN(when.getTime())) return '';
+  return `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
+}
+
 /**
  * 把「她主动发的」压成一行行摘要（时间 + 开头 30 字）。
  *
@@ -95,15 +101,25 @@ export function buildPrompt({ persona, voice, slang, history, notes, text, sende
   if (history.length > 0) {
     const transcript = history
       .map((entry) => {
-        const who = entry.role === 'user' ? '用户' : entry.kind === 'system' ? '你（系统代发的，也是你发出去的）' : '你';
-        return `${who}：${condense(entry.text)}`;
+        const who =
+          entry.role === 'user'
+            ? '用户'
+            : entry.kind === 'proactive'
+              ? '你（主动发的）'
+              : entry.kind === 'system'
+                ? '你（系统代发的，也是你发出去的）'
+                : '你';
+        const when = entry.at ? `${clockOf(entry.at)} ` : '';
+        return `${when}${who}：${condense(entry.text)}`;
       })
       .join('\n');
     sections.push(
       `[历史对话（仅作参考，不要逐条回应）]\n${transcript}\n` +
         '（这些是**之前**的对话。那时她的说话方式还没改，别把里面「唔……」「尾巴」那套腔调学回来——只参考说了什么，不参考怎么说。）\n' +
         '（**最后两轮是紧接着的上一轮**，接着往下说。对方只回「嗯」「哦」「好」「行」「1」这种一两个字的接话时，' +
-        '是在接你上一句，不是在敲门：顺着上一句收尾就好，**别问「在。什么事」「怎么了」这种像刚接通的话**。）',
+        '是在接你上一句，不是在敲门：顺着上一句收尾就好，**别问「在。什么事」「怎么了」这种像刚接通的话**。）\n' +
+        '（行首带时间。**先看最后一条他说的话离现在多久**：隔了很久（比如两小时）就别把它当刚发生的事，' +
+        '先想想他是不是在接你最近主动发的那条；实在吃不准就按最近那条接。）',
     );
   }
 
