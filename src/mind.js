@@ -35,6 +35,20 @@ export function clockOf(at) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/**
+ * 「多久以前」：只给时刻模型算不准——它把 20:54 的话当成二十多分钟前，
+ * 而当时才过去四分钟。给了分钟数它就不会再自己编时间。
+ */
+export function agoLabel(at, now = Date.now()) {
+  if (!at) return '';
+  const diff = now - Number(at);
+  if (diff < 60_000) return '刚刚';
+  const min = Math.round(diff / 60_000);
+  if (min < 60) return `${min} 分钟前`;
+  if (min < 1_440) return `${Math.round(min / 60)} 小时前`;
+  return `${Math.round(min / 1_440)} 天前`;
+}
+
 function dayLabel(at) {
   const d = new Date(at);
   return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -84,11 +98,15 @@ function section(title, body) {
  * 故意不套对话那套「说话方式」：心里想话跟开口说话是两种东西，
  * 用 voice.md 那套写出来的内心独白会变成自言自语表演。
  */
-export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = [], chat = [] }) {
+export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = [], chat = [], now = Date.now() }) {
   const recentText = recent.map((row) => `- ${clockOf(row.at)} ${row.text}`).join('\n');
   const memoryText = memories.map((row) => `- ${dayLabel(row.at)} ${row.text}`).join('\n');
   const chatText = chat
-    .map((row) => `${clockOf(row.at)} ${row.role === 'user' ? '爸爸' : '你'}：${String(row.text).replace(/\s+/g, ' ').slice(0, 80)}`)
+    .map(
+      (row) =>
+        `${clockOf(row.at)}（${agoLabel(row.at, now)}）${row.role === 'user' ? '爸爸' : '你'}：` +
+        `${String(row.text).replace(/\s+/g, ' ').slice(0, 80)}`,
+    )
     .join('\n');
 
   const parts = [
@@ -120,11 +138,13 @@ export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = 
 }
 
 /** 做梦 prompt：同一套素材，换个写法。 */
-export function buildDreamPrompt({ persona, lifeText, recent = [], memories = [], chat = [] }) {
+export function buildDreamPrompt({ persona, lifeText, recent = [], memories = [], chat = [], now = Date.now() }) {
   const seeds = [
     ...recent.slice(-3).map((row) => `- 睡前想的：${row.text}`),
     ...memories.slice(-3).map((row) => `- 记着的：${row.text}`),
-    ...chat.slice(-4).map((row) => `- 睡前说的：${row.role === 'user' ? '爸爸' : '你'}：${String(row.text).slice(0, 60)}`),
+    ...chat.slice(-4).map(
+      (row) => `- ${agoLabel(row.at, now)}说的：${row.role === 'user' ? '爸爸' : '你'}：${String(row.text).slice(0, 60)}`,
+    ),
   ].join('\n');
 
   return [
@@ -336,8 +356,8 @@ export function createMind({ config, runner, persona, life, root = process.cwd()
 
     const prompt =
       verdict.kind === 'dream'
-        ? buildDreamPrompt({ persona: personaText, lifeText, recent, memories, chat: chat.rows })
-        : buildThoughtPrompt({ persona: personaText, lifeText, recent, memories, chat: chat.rows });
+        ? buildDreamPrompt({ persona: personaText, lifeText, recent, memories, chat: chat.rows, now: nowMs })
+        : buildThoughtPrompt({ persona: personaText, lifeText, recent, memories, chat: chat.rows, now: nowMs });
 
     const started = Date.now();
     const { text: raw } = await runner.run(prompt);

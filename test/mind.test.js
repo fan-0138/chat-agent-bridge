@@ -9,6 +9,7 @@ import {
   buildThoughtPrompt,
   buildDreamPrompt,
   parseMind,
+  agoLabel,
   formatThoughtSection,
   formatMemorySection,
   createMind,
@@ -212,4 +213,17 @@ test('做梦那轮落成 dream，不占「想」的额度', async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+test('对话行带「多久以前」：不让模型自己算时间', () => {
+  const now = atHour(21);
+  const prompt = buildThoughtPrompt({
+    persona: '',
+    lifeText: '',
+    chat: [{ at: now - 4 * 60_000, role: 'user', text: '等会宝贝就知道了' }],
+    now,
+  });
+  assert.match(prompt, /20:56（4 分钟前）爸爸：等会宝贝就知道了/);
+  assert.equal(agoLabel(now - 30_000, now), '刚刚');
+  assert.equal(agoLabel(now - 2 * 3_600_000, now), '2 小时前');
+  assert.equal(agoLabel(0, now), '');
 });
