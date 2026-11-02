@@ -112,6 +112,7 @@ python3 mcpctl.py exec <repo>/tools/room/blender/render_final.py
 `assets/sleep.webm` 是「原地小憩沉眠」整段 10 秒：睁眼 → 闭眼睡着 → zzz 冒泡 → 睁眼。
 直接循环会看到她反复醒来、再睡着。所以裁了 **4.58s–6.54s**（睡着、zzz 冒泡那段），
 正放 + 倒放接成 3.9 秒的 ping-pong 循环 → `assets/sleep-loop.webm`，首尾天然接得上。
+重做这个片段：`python3 tools/room/blender/make_sleep_loop.py`（VP9 alpha 要用 `-c:v libvpx-vp9` 解码，否则会出黑底）。
 
 - 房间远景（`?sleepview=room`）：走到床上的点（`NODES.sleep`），播这段循环；
 - 默认的床边特写：还是那套三层合成图 + 呼吸/翻身 CSS，本来就不会重复整段。
