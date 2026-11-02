@@ -107,6 +107,31 @@ python3 mcpctl.py exec <repo>/tools/room/blender/render_final.py
 衣柜/饭锅/柜顶盆栽/挂画、加渲染到 1920×1080 @128 samples 再 bloom。窗帘另外渲了一张
 「拉上窗帘」的（同机位），点窗帘时切图。
 
+## 光线：白天 / 黄昏 / 夜里
+
+以前只有一张夜景图（`assets/room-bg.png`），不管几点都是同一个夜。现在多两版，按她的钟点换：
+
+| 文件 | 什么时候用 | 光 |
+|---|---|---|
+| `room-bg.png` | 19:30–7:00 | 夜里：吊灯/台灯/霓虹，窗外月亮星星 |
+| `room-bg-day.png` | 7:00–16:30 | 白天：窗外太阳（SUN）+ 天空渐变 + 天光面光补散射 |
+| `room-bg-dusk.png` | 16:30–19:30 | 黄昏：低角度橙红太阳，室内灯开一半，霓虹和城市灯亮 |
+
+`index.html` 里 `ROOM_BG_BY_SLOT` 决定；`?time=day|dusk|night` 可以钉死调试。娃娃屋（`?house=1`）有自己的昼夜图，不受影响。
+
+重渲（Blender MCP）：
+
+```sh
+echo day > /tmp/blroom/preset.txt      # 或 dusk
+python3 mcpctl.py exec <repo>/tools/room/blender/render_time.py
+/usr/bin/python3 <repo>/tools/room/blender/post_time.py \
+  /tmp/blroom/room-day-raw.png <repo>/tools/room/assets/room-bg-day.png 1.05
+```
+
+和夜图比，这两版是**真的打了方向光**：窗外一盏 SUN 斜射进来，墙/家具提亮成暖灰，
+天空用渐变贴图，再补一盏天光面光 + 天花板反弹光；渲完用 `post_time.py` 做辉光/暗角/颗粒。
+她的贴片也按时间吃一点环境色（CSS filter），不然白天的立绘亮度和房间对不上。
+
 ## 状态怎么变成画面
 
 `scene.mjs` 里的 `sceneOf()` 按她 activity 里的关键词挑一幕：

@@ -122,6 +122,13 @@
     will-change: left, bottom, transform;
   }
   #her { display: grid; }
+  /* 时间换了，她的贴片也要跟着吃环境光，不然像贴纸 */
+  .stage:not(.house).slot-day #her {
+    filter: drop-shadow(0 14px 18px rgba(20, 16, 10, .45)) brightness(1.05) saturate(1.04);
+  }
+  .stage:not(.house).slot-dusk #her {
+    filter: drop-shadow(0 14px 18px rgba(20, 10, 16, .5)) sepia(.10) saturate(1.08) brightness(1.02);
+  }
   #her video {
     grid-area: 1 / 1;
     height: 100%; width: auto; display: block;
@@ -413,6 +420,38 @@
   let curtainsClosed = false;
   let interactUntil = 0;      // 家具交互进行到什么时候（期间不自动切场景）
   let interactLabel = '';
+  // ── 时间槽：白天 / 黄昏 / 夜里，房间换一张不同光线的渲图 ──
+  // 画面是 Cycles 渲的，光烘在图里，所以按她的钟点换图；?time=day|dusk|night 可以钉死调试
+  const ROOM_BG_BY_SLOT = {
+    day: '/assets/room-bg-day.png',
+    dusk: '/assets/room-bg-dusk.png',
+    night: ROOM_BG_OPEN,
+  };
+  const FORCED_TIME = QUERY.get('time');
+  function currentSlot() {
+    if (FORCED_TIME === 'day' || FORCED_TIME === 'dusk' || FORCED_TIME === 'night') return FORCED_TIME;
+    const d = new Date();
+    const h = d.getHours() + d.getMinutes() / 60;
+    if (h >= 7 && h < 16.5) return 'day';   // 上午到下午
+    if (h >= 16.5 && h < 19.5) return 'dusk'; // 傍晚
+    return 'night';
+  }
+  let roomSlot = currentSlot();
+  function roomSlotSrc() {
+    if (curtainsClosed && roomSlot === 'night') return ROOM_BG_CLOSED;
+    return ROOM_BG_BY_SLOT[roomSlot] ?? ROOM_BG_OPEN;
+  }
+  function applyRoomSlot() {
+    roomSlot = currentSlot();
+    stageEl.classList.remove('slot-day', 'slot-dusk', 'slot-night');
+    stageEl.classList.add(`slot-${roomSlot}`);
+    if (!HOUSE) roomBg.src = roomSlotSrc();
+  }
+  applyRoomSlot();
+  setInterval(() => {
+    if (HOUSE) return;
+    if (currentSlot() !== roomSlot) applyRoomSlot();
+  }, 60_000);
   let manualBubble = '';
   let manualBubbleUntil = 0;
   let epoch = 0;              // 每次取消当前动作 +1；异步流程用它对表
@@ -807,7 +846,7 @@
     // 窗帘：切一张「拉上窗帘」的渲染图
     if (spot.curtain) {
       curtainsClosed = !curtainsClosed;
-      roomBg.src = curtainsClosed ? ROOM_BG_CLOSED : ROOM_BG_OPEN;
+      roomBg.src = roomSlotSrc();
       say(curtainsClosed ? '拉上窗帘，屋里一下安静了' : '拉开看看月亮');
       interactLabel = '窗帘';
       interactUntil = Date.now() + 9000;
