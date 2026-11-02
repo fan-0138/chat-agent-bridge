@@ -158,7 +158,7 @@ if PRESET == "day":
     tint("rug.005", (0.34, 0.37, 0.46, 1.0), 1.0)
     ramp.color_ramp.elements[0].color = (0.72, 0.80, 0.92, 1.0)
     ramp.color_ramp.elements[1].color = (0.22, 0.42, 0.85, 1.0)
-    emit.inputs["Strength"].default_value = 1.05
+    emit.inputs["Strength"].default_value = 0.35
     sun.energy = 30.0
     sun.color = (1.0, 0.85, 0.66)
     sun.angle = 0.045
