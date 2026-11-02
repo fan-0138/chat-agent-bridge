@@ -21,6 +21,10 @@ ROOM_PORT=8771 node tools/room/server.mjs   # 换端口
 
 浏览器打开 http://127.0.0.1:8770 ，页面每 3 秒自动刷新。
 
+右下角「她的小本子」→ http://127.0.0.1:8770/mind.html ：没人说话时她自己想的事和做的梦
+（数据来自 `data/mind/stream.jsonl`，由 `scripts/mind-run.mjs` 常驻写入，见
+[docs/她自己的时间.md](../../docs/她自己的时间.md)）。
+
 调试参数：
 
 | 参数 | 作用 |

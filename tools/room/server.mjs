@@ -178,6 +178,7 @@ const server = createServer(async (req, res) => {
         today: state.day === day ? Number(state.count ?? 0) : 0,
         dreamed: state.dreamDay === day ? Number(state.dreamCount ?? 0) : 0,
         lastAt: Number(state.lastAt ?? 0),
+        wish: state.wish?.at ? { at: Number(state.wish.at), text: String(state.wish.text ?? '') } : null,
         items,
         memories,
       });
