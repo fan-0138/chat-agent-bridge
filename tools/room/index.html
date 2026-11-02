@@ -356,7 +356,7 @@
     work: '/assets/work.webm',       // 写代码
     eat: '/assets/eat.webm',         // 吃白饭
     phone: '/assets/phone.webm',     // 对屏碎碎念（刷抖音）
-    sleep: '/assets/sleep.webm',     // 原地小憩沉眠（坐着打盹）
+    sleep: '/assets/sleep-loop.webm', // 睡着后的循环（从「原地小憩沉眠」裁 4.6–6.5s 正放+倒放）
     window: '/assets/window.webm',   // 东张西望（窗边发呆）
     walk: '/assets/walk-ai.webm',    // AI 生成的横走循环（无缝首尾 + 轻度平滑 + 60fps）
     walkAi: '/assets/ai.webm',       // AI 生成的向前走循环（同流程，另一版）
@@ -446,7 +446,15 @@
     stageEl.classList.remove('slot-day', 'slot-dusk', 'slot-night');
     stageEl.classList.add(`slot-${roomSlot}`);
     if (!HOUSE) roomBg.src = roomSlotSrc();
+    // 半夜（23:00–6:00）默认熄灯：她那个点多半已经睡了，灯还亮着不像半夜
+    if (!HOUSE && !lightsTouched) {
+      const h = new Date().getHours();
+      const deepNight = roomSlot === 'night' && (h >= 23 || h < 6);
+      stageEl.classList.toggle('lights-off', deepNight);
+    }
   }
+  // 主人手动按过灯以后，就别被「半夜默认熄灯」覆盖
+  let lightsTouched = false;
   applyRoomSlot();
   setInterval(() => {
     if (HOUSE) return;
@@ -751,8 +759,9 @@
     stageEl.classList.remove('asleep');
     shadow.style.opacity = '';
 
-    // 睡觉走的是床沿：不走床垫上那个点，免得人站在褥子上凭空消失
-    const target = scene === 'sleep' ? (NODES.bedF ? 'bedF' : NODES.bedSide ? 'bedSide' : scene) : scene;
+    // 睡觉：特写模式走床沿（人马上要消失进被子）；房间远景模式直接坐到床上那一点
+    const roomViewSleep = scene === 'sleep' && !HOUSE && sleepView === 'room' && NODES.sleep;
+    const target = scene === 'sleep' ? (roomViewSleep ? 'sleep' : NODES.bedF ? 'bedF' : NODES.bedSide ? 'bedSide' : scene) : scene;
     const points = planTo(target);
     if (points) {
       setClip(WALK_SRC, { restart: true });
@@ -871,6 +880,7 @@
 
     // 灯：走过去也够不到，直接按开关
     if (spot.lamp) {
+      lightsTouched = true;
       stageEl.classList.toggle('lights-off');
       say(stageEl.classList.contains('lights-off') ? '关灯，省点电' : '开灯，继续干活');
       interactLabel = '灯';

@@ -23,6 +23,17 @@ test('白天 / 黄昏两张房间图都在（仓库里不带 assets，本地有�
   assert.equal(await exists(join(ROOM, 'assets', 'room-bg-dusk.png')), true);
 });
 
+test('睡觉循环片段：从原片裁一段接成无缝 loop', async () => {
+  const hasAssets = await exists(join(ROOM, 'assets', 'sleep.webm'));
+  if (hasAssets) {
+    assert.equal(await exists(join(ROOM, 'assets', 'sleep-loop.webm')), true);
+  }
+  const html = await readFile(join(ROOM, 'index.html'), 'utf8');
+  assert.match(html, /sleep-loop\.webm/);
+  assert.match(html, /roomViewSleep/);   // 远景睡到床上那一点
+  assert.match(html, /deepNight/);       // 半夜默认熄灯
+});
+
 test('房间页按时间换图，并且能 ?time= 钉死', async () => {
   const html = await readFile(join(ROOM, 'index.html'), 'utf8');
   assert.match(html, /ROOM_BG_BY_SLOT/);
