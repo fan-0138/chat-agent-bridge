@@ -25,6 +25,7 @@ export const MAX_MEMORY_CHARS = 120;
 const ACTIONS = new Map([
   ['记住', 'remember'],
   ['想他', 'wish'],
+  ['想看', 'search'],
   ['none', 'none'],
   ['没有', 'none'],
   ['无', 'none'],
@@ -128,13 +129,15 @@ export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = 
         '- 可以想刚听到的话、突然想起的旧事、白日梦、正要做的事、烦的、无聊的。',
         '- 如果上面「刚想过的」里已经连着在想爸爸，这回想想别的。',
         '- 上面「该换个方向」里列的东西，这次一个都别再提（换个新念头，不是改写同一句）。',
-        '- 想留一条以后还记得的 → 做=记住；忽然很想他、想让他知道 → 做=想他；其余 做=none。',
+        '- 想留一条以后还记得的 → 做=记住；忽然很想他、想让他知道 → 做=想他；',
+        '- 突然想知道一件事、想去搜点什么的话 → 做=想看，内容写你要搜的那句话（短，像搜索框里打的字）。',
+        '- 其余 做=none。',
         '- 什么也不想也行：一句废话也算，不用凑主题。',
       ].join('\n'),
     ),
     [
       '只输出一行 JSON，不要解释、不要代码块：',
-      '{"想":"脑子里那句话","情绪":"一两个词","做":"none|记住|想他","内容":"只有做=记住时写，一句话"}',
+      '{"想":"脑子里那句话","情绪":"一两个词","做":"none|记住|想他|想看","内容":"做=记住时写一句要记住的；做=想看时写搜索词"}',
     ].join('\n'),
   ];
   return parts.filter(Boolean).join('\n\n');
@@ -413,6 +416,10 @@ export function createMind({ config, runner, persona, life, root = process.cwd()
     } else if (record.action === 'wish') {
       state.wish = { at: nowMs, text: record.content || '' };
       log?.info?.('她这会儿有点想爸爸。');
+    } else if (record.action === 'search') {
+      const query = tidy(record.content || record.text, 40);
+      state.pendingSearch = { at: nowMs, text: query };
+      log?.info?.(`她想去搜：${query}`);
     }
 
     await saveState();
@@ -433,6 +440,16 @@ export function createMind({ config, runner, persona, life, root = process.cwd()
       .join('\n\n');
   }
 
+  /** 取走「她想去搜的东西」（取完就清掉，搜一次就够）。 */
+  async function takeSearch() {
+    await loadState();
+    const pending = state.pendingSearch;
+    if (!pending?.text) return null;
+    state.pendingSearch = null;
+    await saveState();
+    return pending;
+  }
+
   async function peek() {
     await loadState();
     const nowMs = now();
@@ -447,7 +464,7 @@ export function createMind({ config, runner, persona, life, root = process.cwd()
     };
   }
 
-  return { tick, promptSection, peek, recent: recentThoughts, memories: ownMemories, _state: () => state };
+  return { tick, promptSection, peek, takeSearch, recent: recentThoughts, memories: ownMemories, _state: () => state };
 }
 /* ───────────────────────── 防「同一个念头反复想」 ───────────────────────── */
 

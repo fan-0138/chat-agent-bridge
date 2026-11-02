@@ -16,13 +16,16 @@ import { resolve } from 'node:path';
 import { loadQqConfig } from './config-qq.js';
 import { createLogger } from './log.js';
 import { createLife, describeLife, currentActivity, formatShare, freshShare, localDay } from './life.js';
+import { createMind } from './mind.js';
 
 const argv = new Set(process.argv.slice(2));
 
 async function main() {
   const config = loadQqConfig();
   const log = createLogger('info');
-  const life = createLife({ config, log, root: process.cwd() });
+  // 带上她的心智：如果她脑子里有「想看」，--browse 会直接搜那句
+  const mind = createMind({ config, root: process.cwd(), log });
+  const life = createLife({ config, log, root: process.cwd(), takeSearch: () => mind.takeSearch() });
 
   if (argv.has('--reset')) {
     const file = resolve(process.cwd(), config.lifeStateFile);

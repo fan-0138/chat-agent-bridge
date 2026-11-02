@@ -217,6 +217,10 @@ async function main() {
     log.warn(`语音：不可用 —— ${voiceOut.unavailable}`);
   }
 
+  // 只读她自己的时间（想事、记下的事，以及「想去搜什么」）；真正「想」在 scripts/mind-run.mjs
+  // 那个常驻进程里。先建她、再建生活状态：刷抖音时要能从她这儿拿「这次想搜什么」。
+  mind = createMind({ config, persona, root: process.cwd(), log });
+
   life = createLife({
     config,
     log,
@@ -225,11 +229,8 @@ async function main() {
       const stats = queue.stats();
       return stats.active + stats.waiting > 0;
     },
+    takeSearch: () => mind.takeSearch(),
   });
-
-  // 只读她自己的时间（想事、记下的事）；真正「想」在 scripts/mind-run.mjs 那个常驻进程里，
-  // 不放进桥接：想事挂了不该挡住他说话。
-  mind = createMind({ config, persona, life, root: process.cwd(), log });
 
   bridge = createBridge({
     config,

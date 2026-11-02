@@ -44,6 +44,8 @@ const COMMENTS = Number(option('--comments', 0));
 const LIKE = Number(option('--like', 0));
 const SKIP_IDS = new Set(String(option('--skip', '')).split(',').filter(Boolean));
 const SHOW_ALL = flag('--all');
+// 「她自己想搜的东西」：给了就打开抖音搜索页，滚搜索结果，而不是看推荐流
+const QUERY = String(option('--query', '')).trim();
 
 /* ────────────────────────── 缓存读写 ────────────────────────── */
 
@@ -254,25 +256,32 @@ async function browse() {
         .json()
         .then((json) => {
           for (const raw of pickList(json)) {
-            const item = normalize(raw);
+            const item = normalize(raw?.aweme_info ?? raw);
             if (isWorthKeeping(item) && !collected.has(item.id)) collected.set(item.id, item);
           }
         })
         .catch(() => {});
     });
 
-    if (!(remote && page.url().includes('douyin.com'))) {
-      await page.goto('https://www.douyin.com/', { waitUntil: 'domcontentloaded' });
-      await pause(2_000, 3_000);
-    }
+    if (QUERY) {
+      const searchUrl = `https://www.douyin.com/search/${encodeURIComponent(QUERY)}?type=general`;
+      console.error(`搜索：${QUERY}`);
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+      await pause(2_500, 3_500);
+    } else {
+      if (!(remote && page.url().includes('douyin.com'))) {
+        await page.goto('https://www.douyin.com/', { waitUntil: 'domcontentloaded' });
+        await pause(2_000, 3_000);
+      }
 
-    // ① 快路：在页面里直接调只读接口（同源 + 真 cookie + 真 TLS 指纹，不需要签名）
-    const fast = await collectFast(page);
-    if (fast.items.length > 0) {
-      console.error(`快路采集：${fast.rawCount} 条原始 → ${fast.items.length} 条可用（${Date.now() - fast.startedAt}ms）`);
-      return { items: fast.items, loggedIn: login.loggedIn, liked: [] };
+      // ① 快路：在页面里直接调只读接口（同源 + 真 cookie + 真 TLS 指纹，不需要签名）
+      const fast = await collectFast(page);
+      if (fast.items.length > 0) {
+        console.error(`快路采集：${fast.rawCount} 条原始 → ${fast.items.length} 条可用（${Date.now() - fast.startedAt}ms）`);
+        return { items: fast.items, loggedIn: login.loggedIn, liked: [] };
+      }
+      console.error('快路没拿到候选，退回滚屏采集');
     }
-    console.error('快路没拿到候选，退回滚屏采集');
 
     // 关掉可能出现的「打开 App」引导条，它会挡住滚动
     await page
@@ -316,7 +325,7 @@ async function browse() {
       if (collected.size > 0) console.error('（接口拦截没命中，已退化为页面解析：信息会少一些）');
     }
 
-    const items = [...collected.values()].slice(0, LIMIT);
+    const items = [...collected.values()].slice(0, LIMIT).map((item) => (QUERY ? { ...item, query: QUERY } : item));
 
     if (COMMENTS > 0 && items.length > 0) {
       const targets = items.slice(0, COMMENTS);

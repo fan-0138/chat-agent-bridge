@@ -716,16 +716,23 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
    * 常驻模式下 life.js 不能再自己开浏览器（同一个 profile 只能有一个进程），
    * 所以走请求/响应文件：data/douyin/browse-request.json → browse-result.json
    */
-  async function runBrowse({ likeCount = 0 } = {}) {
+  async function runBrowse({ likeCount = 0, query = '' } = {}) {
     const items = new Map();
     const browsePage = await newHiddenPage();
     const handler = (response) => {
       const url = response.url();
-      if (!/\/aweme\/v[12]\/web\/(module\/feed|multi\/aweme\/detail|tab\/feed)\//.test(url)) return;
+      if (!/\/aweme\/v[12]\/web\/(module\/feed|multi\/aweme\/detail|tab\/feed|general\/search)\/?/.test(url)) return;
       response
         .json()
         .then((json) => {
-          const list = Array.isArray(json?.aweme_list) ? json.aweme_list : Array.isArray(json?.aweme_details) ? json.aweme_details : [];
+          const rawList = Array.isArray(json?.aweme_list)
+            ? json.aweme_list
+            : Array.isArray(json?.aweme_details)
+              ? json.aweme_details
+              : Array.isArray(json?.data)
+                ? json.data
+                : [];
+          const list = rawList.map((entry) => entry?.aweme_info ?? entry);
           for (const raw of list) {
             const id = raw?.aweme_id;
             if (!id || items.has(id)) continue;
@@ -752,9 +759,13 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
       await browsePage.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       });
-      await browsePage.goto('https://www.douyin.com/', { waitUntil: 'domcontentloaded' });
-      await sleep(3_000);
-      for (let i = 0; i < 6; i += 1) {
+      const target = query
+        ? `https://www.douyin.com/search/${encodeURIComponent(query)}?type=general`
+        : 'https://www.douyin.com/';
+      if (query) log.info(`抖音私信通道代刷：搜「${query}」`);
+      await browsePage.goto(target, { waitUntil: 'domcontentloaded' });
+      await sleep(query ? 2_500 : 3_000);
+      for (let i = 0; i < (query ? 4 : 6); i += 1) {
         await browsePage.mouse.move(700, 500).catch(() => {});
         await browsePage.mouse.wheel(0, 500 + Math.random() * 600).catch(() => {});
         await sleep(900 + Math.random() * 1_200);
@@ -776,10 +787,10 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
           await likePage.close().catch(() => {});
         }
       }
-      return { list, liked };
+      return { list, liked, query };
     } catch (error) {
       log.warn(`代刷失败：${error?.message ?? error}`);
-      return { list: [], liked: [] };
+      return { list: [], liked: [], query };
     } finally {
       browsePage.off('response', handler);
       await browsePage.close().catch(() => {});
@@ -846,7 +857,8 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
     }
     await writeFile(requestFile, '', 'utf8').catch(() => {});
     if (!request) return;
-    const { list, liked } = await runBrowse({ likeCount: Number(request.like) || 0 });
+    const query = String(request.query ?? '').slice(0, 40);
+    const { list, liked } = await runBrowse({ likeCount: Number(request.like) || 0, query });
     await writeFile(resultFile, JSON.stringify({ at: Date.now(), items: list, liked }), 'utf8').catch(() => {});
   }
 

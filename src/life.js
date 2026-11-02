@@ -226,7 +226,7 @@ const DEFAULT_STATE = {
   updatedAt: 0,
 };
 
-export function createLife({ config, log, root = process.cwd(), isBusy, now = Date.now }) {
+export function createLife({ config, log, root = process.cwd(), isBusy, takeSearch, now = Date.now }) {
   const stateFile = resolve(root, config.lifeStateFile ?? 'data/life/state.json');
   const douyinScript = resolve(root, config.douyinFeedScript ?? 'scripts/douyin-feed.mjs');
 
@@ -271,7 +271,7 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
    * 抖音私信通道常驻时会占着浏览器 profile（同一个 profile 只能有一个进程），
    * 这时候刷视频改走「请求/响应文件」，由通道在它的浏览器里代刷。
    */
-  async function browseViaChannel({ scroll, limit, likeCount = 0 }) {
+  async function browseViaChannel({ scroll, limit, likeCount = 0, query = '' }) {
     const lockFile = resolve(root, 'data/douyin/browser.lock');
     const requestFile = resolve(root, 'data/douyin/browse-request.json');
     const resultFile = resolve(root, 'data/douyin/browse-result.json');
@@ -281,7 +281,7 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
     } catch {
       /* 没有旧结果正好 */
     }
-    await writeFile(requestFile, JSON.stringify({ at: now(), scroll, limit, like: likeCount }), 'utf8');
+    await writeFile(requestFile, JSON.stringify({ at: now(), scroll, limit, like: likeCount, query }), 'utf8');
 
     const deadline = now() + 150_000;
     while (now() < deadline) {
@@ -310,7 +310,7 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
   async function browse({ scroll = config.lifeBrowseScroll, limit = 25 } = {}) {
     if (browsing) {
       log?.debug('上一次刷抖音还没结束，跳过');
-      return { list: [], liked: [] };
+      return { list: [], liked: [], query: '' };
     }
     browsing = true;
     const started = Date.now();
@@ -320,16 +320,21 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
       const usedToday = state.likeDay === todayKey ? state.likeCount ?? 0 : 0;
       const quota = Math.max(0, Math.min(config.lifeLikePerBrowse, config.lifeLikeMaxPerDay - usedToday));
 
+      // 她自己想搜的东西（心智那一层留下的）：这次刷就搜这个，而不是看推荐
+      const curiosity = await takeSearch?.().catch(() => null);
+      const query = curiosity?.text ? String(curiosity.text).slice(0, 40) : '';
+
       const locked = await stat(resolve(root, 'data/douyin/browser.lock'))
         .then(() => true)
         .catch(() => false);
       if (locked) {
         log?.debug('抖音私信通道占着浏览器，改走代刷');
-        return await browseViaChannel({ scroll, limit, likeCount: quota });
+        return await browseViaChannel({ scroll, limit, likeCount: quota, query });
       }
 
       const result = await new Promise((resolvePromise) => {
         const args = [douyinScript, '--json', '--scroll', String(scroll), '--limit', String(limit)];
+        if (query) args.push('--query', query);
         if (quota > 0) {
           args.push('--like', String(quota), '--skip', state.likedIds.slice(-200).join(','));
         }
@@ -373,11 +378,14 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
         });
       });
 
-      log?.info(`刷抖音：拿到 ${result.list.length} 条（${Math.round((Date.now() - started) / 1000)}s）`);
-      return result;
+      log?.info(
+        `刷抖音：拿到 ${result.list.length} 条（${Math.round((Date.now() - started) / 1000)}s）` +
+          (query ? `，搜的是「${query}」` : ''),
+      );
+      return { ...result, query };
     } catch (error) {
       log?.warn(`刷抖音异常：${error?.message ?? error}`);
-      return { list: [], liked: [] };
+      return { list: [], liked: [], query: '' };
     } finally {
       browsing = false;
     }
@@ -388,7 +396,7 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
     setActivity('在刷抖音', 60);
     await save();
 
-    const { list: items, liked } = await browse();
+    const { list: items, liked, query } = await browse();
     if (liked.length > 0) {
       const day = localDay(now());
       const ok = liked.filter((entry) => entry.ok);
@@ -412,8 +420,8 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
     setActivity('刚刷完抖音，还在回味', 45);
 
     if (item) {
-      state.pendingShare = { item, at: now() };
-      log?.info(`刷到一条想分享的：${String(item.desc).slice(0, 40)}`);
+      state.pendingShare = { item: query ? { ...item, query } : item, at: now() };
+      log?.info(query ? `自己搜「${query}」搜到一条：${String(item.desc).slice(0, 30)}` : `刷到一条想分享的：${String(item.desc).slice(0, 40)}`);
     }
     await save();
     return item;
@@ -479,8 +487,9 @@ export function createLife({ config, log, root = process.cwd(), isBusy, now = Da
       }
       const share = freshShare(state, now());
       if (share) {
+        const viaSearch = share.item?.query ? `（这条是你自己搜「${share.item.query}」搜出来的）\n` : '';
         parts.push(
-          `[你刚刷到的视频]\n${formatShare(share.item)}\n` +
+          `[你刚刷到的视频]\n${viaSearch}${formatShare(share.item)}\n` +
             '（这是你自己刚刷到的。主人问到你在干嘛、或者话题挨得上，可以自然提一嘴；' +
             '**同一个视频只说一次**，说过的别再提；' +
             '完全不相关就别硬塞。）',

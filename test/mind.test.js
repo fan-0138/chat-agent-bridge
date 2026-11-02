@@ -123,6 +123,10 @@ test('解析：正常 JSON、代码块、带解释、纯文本兜底', () => {
   const wish = parseMind('{"想":"有点想他","情绪":"软","做":"想他"}');
   assert.equal(wish.action, 'wish');
 
+  const search = parseMind('{"想":"鲸鱼为什么会搁浅","情绪":"好奇","做":"想看","内容":"鲸鱼为什么会搁浅"}');
+  assert.equal(search.action, 'search');
+  assert.equal(search.content, '鲸鱼为什么会搁浅');
+
   const plain = parseMind('就是有点想吃西瓜', 'think');
   assert.equal(plain.text, '就是有点想吃西瓜');
   assert.equal(plain.action, 'none');
@@ -246,4 +250,27 @@ test('prompt 里会列出「这次换个方向」', () => {
   const prompt = buildThoughtPrompt({ persona: '', lifeText: '', themes: ['眼镜', '滑落'] });
   assert.match(prompt, /该换个方向/);
   assert.match(prompt, /眼镜/);
+});
+
+test('她惦记着想搜的东西，取一次就清掉', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'mind-'));
+  try {
+    const now = atHour(15);
+    const mind = createMind({
+      config: baseConfig,
+      runner: { run: async () => ({ text: '{"想":"有点好奇","情绪":"好奇","做":"想看","内容":"鲸鱼为什么会搁浅"}' }) },
+      root: dir,
+      now: () => now,
+      log: { debug() {}, info() {}, warn() {}, error() {} },
+    });
+    const result = await mind.tick({ force: true });
+    assert.equal(result.ok, true);
+    assert.equal(result.record.action, 'search');
+
+    const first = await mind.takeSearch();
+    assert.equal(first.text, '鲸鱼为什么会搁浅');
+    assert.equal(await mind.takeSearch(), null, '取过一次就清掉');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
