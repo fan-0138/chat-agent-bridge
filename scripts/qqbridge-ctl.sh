@@ -246,6 +246,10 @@ stop_mind() {
 }
 
 start_room() {
+  if [ ! -f tools/room/server.mjs ]; then
+    log "跳过小鲸的房间：这里没有 tools/room（自用功能，不在开源仓库里）"
+    return 0
+  fi
   if room_running; then
     log "小鲸的房间已经在跑：http://127.0.0.1:$ROOM_PORT"
     return 0
