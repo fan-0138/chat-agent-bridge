@@ -26,7 +26,7 @@ function makeConfig(overrides = {}) {
   };
 }
 
-async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, sticker, sendSticker } = {}) {
+async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, sticker, sendSticker, mind } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'bridge-'));
   const memory = createMemory({ dir, maxTurns: 6, maxChars: 2000, log: silentLog });
   const sent = [];
@@ -47,6 +47,7 @@ async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, s
     voiceOut,
     sticker,
     sendSticker,
+    mind,
     sendVoice: async (_target, buffer, meta) => voices.push({ size: buffer.length, ...meta }),
     reply: async (_target, text) => sent.push(text),
     vision:
@@ -587,4 +588,32 @@ test('系统替她发的消息（月报等）在历史里标清楚', async () =>
   await bridge.handle({ ...baseMsg, id: 'm-sys-1', text: '你不是写出来了吗' });
   assert.match(prompts[0], /系统代发的/);
   assert.match(prompts[0], /一共 26 顿/);
+});
+
+test('她自己时间里想的事会带进这一轮 prompt', async () => {
+  const { bridge, prompts } = await setup({
+    mind: {
+      async promptSection() {
+        return '[你自己刚才在心里想的（不是他说的话）]\n- 21:41 风扇声像海。';
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, text: '在干嘛' });
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /风扇声像海/);
+  assert.match(prompts[0], /不是他说的话/);
+});
+
+test('她的想法读不出来时不影响正常回复', async () => {
+  const { bridge, sent, prompts } = await setup({
+    mind: {
+      async promptSection() {
+        throw new Error('文件坏了');
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg });
+  assert.deepEqual(sent, ['好的，已完成。']);
+  assert.equal(prompts.length, 1);
+  assert.doesNotMatch(prompts[0], /你在心里想的/);
 });

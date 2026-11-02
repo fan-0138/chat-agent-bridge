@@ -23,13 +23,14 @@ import { looksLikeThinking, stripThinking, looksLikeSelfTalk, stripSelfTalk } fr
  *   typing?: (senderId: string) => Promise<void>,
  *   onActivity?: (state: string) => void,
  *   life?: {promptSection: () => Promise<string>},
+ *   mind?: {promptSection: () => Promise<string>},
  *   sticker?: {pick: () => Promise<string|null>},
  *   sendSticker?: (msg: any, file: string) => Promise<void>,
  * }} deps
  */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function createBridge({ config, runner, chatRunner, memory, queue, log, reply, typing, persona, voice, slang, vision, onActivity, life, sticker, sendSticker, voiceOut, sendVoice }) {
+export function createBridge({ config, runner, chatRunner, memory, queue, log, reply, typing, persona, voice, slang, vision, onActivity, life, mind, sticker, sendSticker, voiceOut, sendVoice }) {
   /**
    * 上一轮是不是卡超时了。
    * 她看不到系统这一层：10-29 19:45 那轮 DSH 超时，系统自动发了句「这个卡住了」，
@@ -172,6 +173,8 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     }
 
     const lifeText = life ? await life.promptSection().catch(() => '') : '';
+    // 她自己时间里想的事：接进这一轮，让她接着自己刚才想的往下说，而不是从零开机
+    const mindText = mind ? await mind.promptSection().catch(() => '') : '';
 
     // 他隔了多久才收到回复：不写清楚，她就会自己编（「才二十分钟不到」其实三十多分钟）
     const lastUserAt = [...dialogue].reverse().find((entry) => entry.role === 'user')?.at ?? 0;
@@ -201,6 +204,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
           '他要是问你回得慢，就直说刚才卡了一下。',
       );
     }
+    if (mindText) extraLines.push(mindText);
 
     const prompt = buildPrompt({
       persona: personaText,

@@ -30,6 +30,7 @@ import { createVision, resolveVisionCli } from './vision.js';
 import { startOneBot } from './transport-onebot.js';
 import { createProactive } from './proactive.js';
 import { createLife } from './life.js';
+import { createMind } from './mind.js';
 import { createStickers } from './stickers.js';
 import { createVoiceOut } from './voice-out.js';
 import {
@@ -162,6 +163,8 @@ async function main() {
   let proactive;
   /** @type {ReturnType<typeof createLife> | undefined} */
   let life;
+  /** @type {ReturnType<typeof createMind> | undefined} */
+  let mind;
   /** @type {ReturnType<typeof createDouyinChannel> | undefined} */
   let douyinChat;
 
@@ -224,6 +227,10 @@ async function main() {
     },
   });
 
+  // 只读她自己的时间（想事、记下的事）；真正「想」在 scripts/mind-run.mjs 那个常驻进程里，
+  // 不放进桥接：想事挂了不该挡住他说话。
+  mind = createMind({ config, persona, life, root: process.cwd(), log });
+
   bridge = createBridge({
     config,
     runner,
@@ -238,6 +245,7 @@ async function main() {
     slang,
     vision,
     life,
+    mind,
     sticker,
     sendSticker: transport.sendImage,
     voiceOut,
@@ -261,6 +269,7 @@ async function main() {
     captureShot: (share) => douyinChat?.captureShot?.(share) ?? null,
     sendImage: transport.sendImage,
     life,
+    mind,
   });
   proactive.start();
   life.start();

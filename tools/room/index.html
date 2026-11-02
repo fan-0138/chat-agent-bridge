@@ -90,6 +90,15 @@
     transition: background .15s, color .15s;
   }
   #sleepMode:hover { background: rgba(30, 44, 74, .85); color: #eaf2ff; }
+  /* 她自己的时间：没人说话时她心里在想什么 */
+  #mindBtn {
+    position: absolute; right: 12px; bottom: 44px; z-index: 9;
+    font: inherit; font-size: 11.5px; color: rgba(220, 232, 255, .82);
+    background: rgba(10, 15, 26, .62); border: 1px solid rgba(140, 170, 255, .25);
+    border-radius: 999px; padding: 5px 12px; text-decoration: none;
+    transition: background .15s, color .15s;
+  }
+  #mindBtn:hover { background: rgba(30, 44, 74, .85); color: #eaf2ff; }
 
   /* 关灯：把房间压暗一点（她自己会去按开关） */
   .stage.lights-off .room { filter: brightness(.62) saturate(.85); }
@@ -280,6 +289,7 @@
     <div id="hotspots"></div>
     <div id="hint">点房间里的家具，她会自己过去</div>
     <button id="sleepMode" type="button">睡觉：床边特写</button>
+    <a id="mindBtn" href="mind.html" title="没人说话的时候，她自己在想什么">她的小本子</a>
 
     <div class="hud">
       <div class="card identity">

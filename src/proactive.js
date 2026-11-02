@@ -129,8 +129,8 @@ export function describeMoment({ now = Date.now(), idleMin = null, lastSaid = ''
   return `现在是 ${clock}。他上一次说话是 ${Math.round(idleMin / 60)} 小时前${said}。`;
 }
 
-/** @param {{config:any, log:any, runner:any, persona:any, memory:any, reply:Function, isBusy:Function, life?:any, altReply?:Function, now?:Function}} deps */
-export function createProactive({ config, log, runner, persona, voice, memory, reply, isBusy, life, altReply, captureShot, sendImage, now = Date.now }) {
+/** @param {{config:any, log:any, runner:any, persona:any, memory:any, reply:Function, isBusy:Function, life?:any, mind?:any, altReply?:Function, now?:Function}} deps */
+export function createProactive({ config, log, runner, persona, voice, memory, reply, isBusy, life, mind, altReply, captureShot, sendImage, now = Date.now }) {
   /** @type {{day?:string, count:number, lastSentAt:number, lastUserAt:number}} */
   const state = { count: 0, lastSentAt: 0, lastUserAt: 0 };
   let timer = null;
@@ -218,6 +218,8 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       const talkedRecently = lastTurnAt > 0 && now() - lastTurnAt < 6 * 3_600_000;
 
       const lifeText = life ? await life.promptSection().catch(() => '') : '';
+      // 她自己时间里想的事：主动开口时从这儿长出来，比从随机话题清单里挑更像她
+      const mindText = mind ? await mind.promptSection().catch(() => '') : '';
 
       // 今天已经主动说过什么：不给她看，她就会一遍遍说同一件事
       // （11-01 一晚上提了三次「机房热 / 风扇烫」）
@@ -235,6 +237,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
         voiceText,
         `[此刻] ${describeMoment({ now: now(), idleMin: Number.isFinite(idleMin) ? idleMin : null, lastSaid })}`,
         lifeText,
+        mindText,
         recentDialogue.length > 0
           ? `[最近对话（别重复里面说过的事，可以接着聊）]\n${recentDialogue.map((e) => `${e.role === 'user' ? '爸爸' : '你'}：${e.text.slice(0, 120)}`).join('\n')}`
           : '[最近对话]\n（今天还没聊）',

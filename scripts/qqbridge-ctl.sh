@@ -44,6 +44,8 @@ watch_pid()  { ps -axo pid=,args= | awk '$2=="/bin/sh" && $3 ~ /net-watch\.sh$/ 
 room_pid()   { lsof -nP -tiTCP:"$ROOM_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
 # 声音复刻服务也按端口认（它加载模型要几十秒，pid 文件不一定写得及时）
 tts_pid()    { lsof -nP -tiTCP:"$TTS_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
+# 「她自己的时间」是个独立 node 进程，没有端口，按命令行认
+mind_pid()   { ps -axo pid=,args= | awk '$2=="node" && /scripts\/mind-run\.mjs/ {print $1; exit}'; }
 
 running() { [ -n "$(node_pid)" ]; }
 not_running() { ! running; }
@@ -51,6 +53,8 @@ remind_running() { [ -n "$(remind_pid)" ]; }
 watch_running() { [ -n "$(watch_pid)" ]; }
 room_running() { [ -n "$(room_pid)" ]; }
 tts_running() { [ -n "$(tts_pid)" ]; }
+mind_running() { [ -n "$(mind_pid)" ]; }
+not_mind_running() { ! mind_running; }
 not_tts_running() { ! tts_running; }
 not_remind_running() { ! remind_running; }
 not_watch_running() { ! watch_running; }
@@ -203,6 +207,44 @@ stop_tts() {
   fi
 }
 
+# 她自己的时间：没人说话时她自己想事。开关在 .env.qq（QQ_MIND_ENABLED）
+start_mind() {
+  if mind_running; then
+    log "她自己的时间已经在跑（node $(mind_pid)）"
+    return 0
+  fi
+  _enabled=$(grep -E '^QQ_MIND_ENABLED=' .env.qq 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "'"'"'')
+  case "$_enabled" in
+    1|true|yes|on) ;;
+    *)
+      log "跳过「她自己的时间」：.env.qq 里 QQ_MIND_ENABLED 没开"
+      return 0
+      ;;
+  esac
+  set -m
+  nohup node --env-file-if-exists=.env.qq scripts/mind-run.mjs >> logs/mind.log 2>&1 &
+  echo $! > logs/mind.pid
+  if wait_until mind_running 5; then
+    log "她自己的时间已启动（约 10 分钟想一次，日志 logs/mind.log）"
+    return 0
+  fi
+  log "「她自己的时间」没起来，看 logs/mind.log"
+  return 1
+}
+
+stop_mind() {
+  _p=$(mind_pid)
+  if [ -n "$_p" ]; then
+    kill -TERM "$_p" 2>/dev/null
+    wait_until not_mind_running 15
+    rm -f logs/mind.pid
+    log "「她自己的时间」已停止。"
+  else
+    rm -f logs/mind.pid
+    log "「她自己的时间」本来就没在跑。"
+  fi
+}
+
 start_room() {
   if room_running; then
     log "小鲸的房间已经在跑：http://127.0.0.1:$ROOM_PORT"
@@ -299,6 +341,12 @@ status() {
   else
     log "  没在跑"
   fi
+  log "── 她自己的时间 ──"
+  if mind_running; then
+    log "  运行中：node $(mind_pid)（想法在 data/mind/stream.jsonl）"
+  else
+    log "  没在跑"
+  fi
   log "── 小鲸的房间 ──"
   if room_running; then
     log "  运行中：http://127.0.0.1:$ROOM_PORT（node $(room_pid)）"
@@ -313,11 +361,11 @@ status() {
 }
 
 case "${1:-status}" in
-  start)     start_bridge; start_tts; start_room ;;
-  stop)      stop_bridge; stop_tts; stop_room ;;
-  restart)   stop_bridge; stop_tts; stop_room; sleep 1; start_bridge; start_tts; start_room ;;
+  start)     start_bridge; start_tts; start_mind; start_room ;;
+  stop)      stop_bridge; stop_tts; stop_mind; stop_room ;;
+  restart)   stop_bridge; stop_tts; stop_room; stop_mind; sleep 1; start_bridge; start_tts; start_mind; start_room ;;
   status)    status ;;
-  start-all) start_bridge; start_remind; start_watch; start_tts; start_room ;;
+  start-all) start_bridge; start_remind; start_watch; start_tts; start_mind; start_room ;;
   stop-all)
     stop_bridge
     _stopped_remind=0
@@ -336,10 +384,11 @@ case "${1:-status}" in
     [ "$_stopped_watch" = "1" ] && log "网络看门狗已停止。"
     rm -f logs/net-watch.pid
     stop_tts
+    stop_mind
     stop_room
     ;;
   *)
-    log "用法：$0 {start|stop|restart|status|start-all|stop-all}（start/stop 会把小鲸的房间一起带上）"
+    log "用法：$0 {start|stop|restart|status|start-all|stop-all}（start/stop 会把声音复刻、她自己的时间、小鲸的房间一起带上）"
     exit 2
     ;;
 esac

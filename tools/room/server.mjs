@@ -156,6 +156,35 @@ const server = createServer(async (req, res) => {
       res.end(body);
       return;
     }
+    // 她自己的时间：没人说话时她在想什么（data/mind/stream.jsonl）
+    if (url.pathname === '/api/mind') {
+      const items = (await readLines(join(ROOT, 'data/mind/stream.jsonl'), 400))
+        .filter((row) => row && (row.kind === 'think' || row.kind === 'dream'))
+        .map((row) => ({
+          at: Number(row.at ?? 0),
+          kind: row.kind,
+          text: String(row.text ?? ''),
+          mood: String(row.mood ?? ''),
+          saved: row.saved ? String(row.saved) : null,
+        }));
+      const memories = (await readLines(join(ROOT, 'data/mind/memory.jsonl'), 100)).map((row) => ({
+        at: Number(row.at ?? 0),
+        text: String(row.text ?? ''),
+      }));
+      const state = await readJson(join(ROOT, 'data/mind/state.json'), {});
+      const day = localDay();
+      const body = JSON.stringify({
+        now: Date.now(),
+        today: state.day === day ? Number(state.count ?? 0) : 0,
+        dreamed: state.dreamDay === day ? Number(state.dreamCount ?? 0) : 0,
+        lastAt: Number(state.lastAt ?? 0),
+        items,
+        memories,
+      });
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(body);
+      return;
+    }
     const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
     const file = join(HERE, rel);
     if (!file.startsWith(HERE)) {
