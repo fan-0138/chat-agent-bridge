@@ -10,6 +10,7 @@ import { buildPrompt, notesFrom } from './prompt.js';
 import { splitBubbles, splitReply } from './split.js';
 import { parseVoiceSegments } from './voice-out.js';
 import { looksLikeThinking, stripThinking, looksLikeSelfTalk, stripSelfTalk } from './thinking-guard.js';
+import { looksUnfinished, isLowContent, pickNudge } from './reader.js';
 
 
 /**
@@ -41,6 +42,17 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
   const failedTurns = new Map();
   const seen = new Set();
   const unknownNotified = new Map();
+  /** 他连着发、或者话没说完时的暂存：key -> {parts, timer, firstAt} */
+  const inbox = new Map();
+  /** 今天「故意不接」了几次、上次是什么时候 */
+  const skipState = { day: '', count: 0, lastAt: 0 };
+  /** 最近用过的「先问一句」，别老用同一句 */
+  const nudges = [];
+
+  function localDayKey(now = Date.now()) {
+    const d = new Date(now);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
 
   const isAllowed = (msg) => {
     if (config.allowUnknown) return true;
@@ -82,6 +94,111 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     if (text !== raw) log.warn(`输入过长已截断 sender=${msg.senderId} ${raw.length} -> ${limit}`);
 
     const key = memoryKey(msg);
+
+    // 他会连着打几条、或者话说一半停住：先攒一小会儿再答，别一句一句地打乒乓球
+    if (shouldBuffer(msg)) {
+      bufferMessage(msg, key, text);
+      return;
+    }
+    await processMessage(msg, key, text);
+  }
+
+  /** 攒消息：同一个人、挨着发的几条，合成一轮再答。群里不攒（@ 了就得应）。 */
+  function shouldBuffer(msg) {
+    if (!(Number(config.replyMergeWindowMs ?? 0) > 0)) return false;
+    if (msg.roomName || msg.groupId) return false;
+    return msg.type === 'text' || msg.type === 'media';
+  }
+
+  function bufferMessage(msg, key, text) {
+    const now = Date.now();
+    const entry = inbox.get(key) ?? { parts: [], timer: null, firstAt: now };
+    entry.parts.push({ msg, text, at: now });
+    if (entry.parts.length > 8) entry.parts.splice(0, entry.parts.length - 8);
+
+    // 图片/语音到了就立刻处理，别让图在缓冲里躺着（前面的话一起带上去）
+    if (msg.type === 'media') {
+      inbox.set(key, entry);
+      void flushInbox(key).catch((error) => log.warn(`处理攒着的消息失败：${error?.message ?? error}`));
+      return;
+    }
+
+    // 话没说完（「那个…」「我觉得」）就多等一会儿；说完了只留很短的空档给连发
+    const unfinished = looksUnfinished(text);
+    const waitWindow = unfinished ? Number(config.replyUnfinishedWaitMs ?? 9_000) : Number(config.replyMergeWindowMs ?? 1_500);
+    const cap = Number(config.replyMaxWaitMs ?? 20_000);
+    const due = Math.max(0, Math.min(waitWindow, cap - (now - entry.firstAt)));
+
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(
+      () => void flushInbox(key).catch((error) => log.warn(`处理攒着的消息失败：${error?.message ?? error}`)),
+      due,
+    );
+    entry.timer.unref?.();
+    inbox.set(key, entry);
+  }
+
+  async function flushInbox(key) {
+    const entry = inbox.get(key);
+    if (!entry) return;
+    inbox.delete(key);
+    if (entry.timer) clearTimeout(entry.timer);
+
+    const parts = entry.parts.filter((part) => part.text || part.msg.type === 'media');
+    if (parts.length === 0) return;
+    const last = parts[parts.length - 1];
+    const combined = parts.map((part) => part.text).filter(Boolean).join('\n');
+
+    if (parts.length > 1) log.info(`他连发了 ${parts.length} 条，合成一轮再答`);
+
+    // 话说一半，等完了还没下文：不硬答，先问一句
+    if (parts.length === 1 && last.msg.type === 'text' && looksUnfinished(combined)) {
+      await nudge(last.msg, combined);
+      return;
+    }
+
+    // 纯应答（「嗯」「哈哈」）偶尔就不接，别像客服
+    if (await shouldSkip(last.msg, key, combined, parts.length)) return;
+
+    await processMessage(last.msg, key, combined);
+  }
+
+  /** 这一条不值得回：额度、间隔、随机，三个都过才不接。 */
+  async function shouldSkip(msg, key, text, partCount) {
+    const chance = Number(config.replySkipChance ?? 0);
+    if (!(chance > 0) || partCount !== 1) return false;
+    if (msg.type !== 'text' || !isLowContent(text)) return false;
+
+    const day = localDayKey();
+    const budget = Number(config.replySkipMaxPerDay ?? 0);
+    const used = skipState.day === day ? skipState.count : 0;
+    if (used >= budget) return false;
+    const gapMs = Number(config.replySkipMinGapMin ?? 20) * 60_000;
+    if (skipState.lastAt && Date.now() - skipState.lastAt < gapMs) return false;
+    if (Math.random() >= chance) return false;
+
+    skipState.day = day;
+    skipState.count = used + 1;
+    skipState.lastAt = Date.now();
+    await memory.append(key, 'user', text).catch(() => {});
+    log.info(`这条不接了（今天第 ${skipState.count}/${budget} 次）：${text.slice(0, 20)}`);
+    onActivity?.('skipped');
+    return true;
+  }
+
+  /** 没说完又没下文：她先问一句，别自己脑补半句去接。 */
+  async function nudge(msg, text) {
+    const line = pickNudge(nudges, Math.random);
+    nudges.push(line);
+    if (nudges.length > 6) nudges.shift();
+    await safeReply(msg, line);
+    const key = memoryKey(msg);
+    await memory.append(key, 'user', text).catch(() => {});
+    await memory.append(key, 'assistant', line).catch(() => {});
+    log.info(`他没说完，先问一句：${line}`);
+  }
+
+  async function processMessage(msg, key, text) {
     const stats = queue.stats();
     const queuedAhead = stats.waiting > 0 || stats.active > 0;
 

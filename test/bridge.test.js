@@ -617,3 +617,60 @@ test('她的想法读不出来时不影响正常回复', async () => {
   assert.equal(prompts.length, 1);
   assert.doesNotMatch(prompts[0], /你在心里想的/);
 });
+
+const sleepMs = (ms) => new Promise((done) => setTimeout(done, ms));
+
+test('他连着发几条，会合成一轮再答', async () => {
+  const { bridge, prompts, sent } = await setup({ config: makeConfig({ replyMergeWindowMs: 40 }) });
+  await bridge.handle({ ...baseMsg, id: 'm-a1', text: '今天' });
+  await bridge.handle({ ...baseMsg, id: 'm-a2', text: '好累' });
+  assert.equal(prompts.length, 0, '还在攒的时候不该先答');
+  await sleepMs(200);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /今天\n好累/);
+  assert.equal(sent.length, 1);
+});
+
+test('话说一半没下文，先问一句，不调模型', async () => {
+  const { bridge, prompts, sent } = await setup({
+    config: makeConfig({ replyMergeWindowMs: 40, replyUnfinishedWaitMs: 50 }),
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-b1', text: '那个…' });
+  await sleepMs(200);
+  assert.equal(prompts.length, 0);
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0].length <= 8, sent[0]);
+});
+
+test('话说一半他接着说，合成一轮答、不追问', async () => {
+  const { bridge, prompts, sent } = await setup({
+    config: makeConfig({ replyMergeWindowMs: 40, replyUnfinishedWaitMs: 80 }),
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-c1', text: '那个…' });
+  await sleepMs(20);
+  await bridge.handle({ ...baseMsg, id: 'm-c2', text: '我想问问' });
+  await sleepMs(250);
+  assert.equal(sent.length, 1);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /那个…\n我想问问/);
+});
+
+test('纯应答有时候就不回', async () => {
+  const { bridge, prompts, sent } = await setup({
+    config: makeConfig({ replyMergeWindowMs: 30, replySkipChance: 1, replySkipMaxPerDay: 5, replySkipMinGapMin: 0 }),
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-d1', text: '嗯' });
+  await sleepMs(150);
+  assert.equal(prompts.length, 0);
+  assert.equal(sent.length, 0);
+});
+
+test('问句不会被晾着', async () => {
+  const { bridge, prompts, sent } = await setup({
+    config: makeConfig({ replyMergeWindowMs: 30, replySkipChance: 1, replySkipMaxPerDay: 5, replySkipMinGapMin: 0 }),
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-e1', text: '在吗' });
+  await sleepMs(150);
+  assert.equal(prompts.length, 1);
+  assert.equal(sent.length, 1);
+});
