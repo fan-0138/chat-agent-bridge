@@ -10,6 +10,8 @@ import {
   buildDreamPrompt,
   parseMind,
   agoLabel,
+  recentThemes,
+  repeatsThemes,
   formatThoughtSection,
   formatMemorySection,
   createMind,
@@ -226,4 +228,22 @@ test('对话行带「多久以前」：不让模型自己算时间', () => {
   assert.equal(agoLabel(now - 30_000, now), '刚刚');
   assert.equal(agoLabel(now - 2 * 3_600_000, now), '2 小时前');
   assert.equal(agoLabel(0, now), '');
+});
+
+test('连着几条都在说同一个东西，能认出来', () => {
+  const rows = [
+    { text: '眼镜又滑到鼻尖了，懒得往上推' },
+    { text: '眼镜推上去两秒又滑回来' },
+    { text: '眼镜怎么推都往下滑' },
+  ];
+  const themes = recentThemes(rows);
+  assert.ok(themes.includes('眼镜'), themes.join(','));
+  assert.equal(repeatsThemes('眼镜还是不听话', themes), true);
+  assert.equal(repeatsThemes('想吃西瓜', themes), false);
+});
+
+test('prompt 里会列出「这次换个方向」', () => {
+  const prompt = buildThoughtPrompt({ persona: '', lifeText: '', themes: ['眼镜', '滑落'] });
+  assert.match(prompt, /该换个方向/);
+  assert.match(prompt, /眼镜/);
 });

@@ -98,9 +98,10 @@ function section(title, body) {
  * 故意不套对话那套「说话方式」：心里想话跟开口说话是两种东西，
  * 用 voice.md 那套写出来的内心独白会变成自言自语表演。
  */
-export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = [], chat = [], now = Date.now() }) {
+export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = [], chat = [], themes = [], now = Date.now() }) {
   const recentText = recent.map((row) => `- ${clockOf(row.at)} ${row.text}`).join('\n');
   const memoryText = memories.map((row) => `- ${dayLabel(row.at)} ${row.text}`).join('\n');
+  const themeText = themes.length > 0 ? themes.map((word) => `- ${word}`).join('\n') : '';
   const chatText = chat
     .map(
       (row) =>
@@ -114,6 +115,7 @@ export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = 
     section('你是谁', persona),
     section('此刻', lifeText),
     section('你刚在心里想过的（接着往下想，别重复）', recentText),
+    section('最近想过、这次该换个方向的东西（别再想这些了）', themeText),
     section('你以前自己在心里记下的', memoryText),
     section('最近跟爸爸的对话（只是背景，这一轮不用回）', chatText),
     section(
@@ -125,6 +127,7 @@ export function buildThoughtPrompt({ persona, lifeText, recent = [], memories = 
         '- 不编没发生过的事：没去过的写成想去，没人说过的别写成他说过。',
         '- 可以想刚听到的话、突然想起的旧事、白日梦、正要做的事、烦的、无聊的。',
         '- 如果上面「刚想过的」里已经连着在想爸爸，这回想想别的。',
+        '- 上面「该换个方向」里列的东西，这次一个都别再提（换个新念头，不是改写同一句）。',
         '- 想留一条以后还记得的 → 做=记住；忽然很想他、想让他知道 → 做=想他；其余 做=none。',
         '- 什么也不想也行：一句废话也算，不用凑主题。',
       ].join('\n'),
@@ -354,22 +357,28 @@ export function createMind({ config, runner, persona, life, root = process.cwd()
     const lifeText = life ? await life.promptSection().catch(() => '') : '';
     const recent = (await recentThoughts(5)).filter((row) => row.kind === 'think' && nowMs - Number(row.at ?? 0) < 6 * 3_600_000);
     const memories = await ownMemories(6);
+    // 最近连着想同一件事（眼镜、手机、机房）时，明确让她换个方向
+    const themes = recentThemes(recent.slice(-3));
 
     const prompt =
       verdict.kind === 'dream'
         ? buildDreamPrompt({ persona: personaText, lifeText, recent, memories, chat: chat.rows, now: nowMs })
-        : buildThoughtPrompt({ persona: personaText, lifeText, recent, memories, chat: chat.rows, now: nowMs });
+        : buildThoughtPrompt({ persona: personaText, lifeText, recent, memories, chat: chat.rows, themes, now: nowMs });
 
     const started = Date.now();
     const { text: raw } = await runner.run(prompt);
     const parsed = parseMind(raw, verdict.kind);
     if (!parsed?.text) return { ok: false, reason: 'empty' };
 
-    // 复读机：和最近三条一模一样就当没想（模型偶尔会卡在同一句上）
+    // 复读机：和最近三条一模一样、或者又在想说过的同一个东西，就当没想
     const echoed = recent.slice(-3).some((row) => row.text === parsed.text);
     if (echoed) {
       log?.warn?.(`这次想的内容和刚才重复了，丢掉：${parsed.text.slice(0, 30)}`);
       return { ok: false, reason: 'repeat' };
+    }
+    if (verdict.kind === 'think' && repeatsThemes(parsed.text, themes)) {
+      log?.warn?.(`又在想 ${themes.join('/')}，丢掉：${parsed.text.slice(0, 30)}`);
+      return { ok: false, reason: 'theme-repeat' };
     }
 
     const record = {
@@ -439,4 +448,48 @@ export function createMind({ config, runner, persona, life, root = process.cwd()
   }
 
   return { tick, promptSection, peek, recent: recentThoughts, memories: ownMemories, _state: () => state };
+}
+/* ───────────────────────── 防「同一个念头反复想」 ───────────────────────── */
+
+/** 这些词哪条想法里都有，不能当「主题」用。 */
+const THEME_STOPWORDS = new Set([
+  '人家','爸爸','本鲸','自己','一个','这个','那个','就是','时候','什么','没有','好像','有点',
+  '觉得','不是','还是','已经','然后','因为','所以','现在','我们','你们','他们','起来','下来',
+  '出去','进来','知道','可以','这样','那样','一样','东西','事情','这边','那边','半天','反正',
+  '有点','一直','两个','一下','真的','可能','应该','整个','其实','不过','但是','如果',
+  '今天','明天','昨天','刚才','早上','晚上','中午','已经','还没','还是','算了','干脆','反正',
+]);
+
+function bigramsOf(text) {
+  const clean = String(text ?? '').replace(/[^\u4e00-\u9fff]/g, '');
+  const out = new Set();
+  for (let i = 0; i < clean.length - 1; i += 1) out.add(clean.slice(i, i + 2));
+  return out;
+}
+
+/**
+ * 最近几条想法里重复出现的东西（比如连着四条都在说眼镜）。
+ * 用来在 prompt 里明确「这次换个方向」，防止她一天到晚想同一件事。
+ * @param {Array<{text: string}>} rows
+ * @returns {string[]}
+ */
+export function recentThemes(rows = [], { lookback = 3, minCount = 2, limit = 8 } = {}) {
+  const counts = new Map();
+  for (const row of rows.slice(-lookback)) {
+    for (const gram of bigramsOf(row?.text)) {
+      if (THEME_STOPWORDS.has(gram)) continue;
+      counts.set(gram, (counts.get(gram) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count >= minCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([gram]) => gram);
+}
+
+/** 这条新想法是不是又在说上面那些东西（命中一个就算，主题词已经滤过虚词）。 */
+export function repeatsThemes(text, themes = []) {
+  const grams = bigramsOf(text);
+  return themes.some((theme) => grams.has(theme));
 }
