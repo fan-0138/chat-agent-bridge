@@ -45,7 +45,10 @@
     "douyin:hot": "node scripts/douyin-hot.mjs",
     "douyin:comment": "node scripts/douyin-comment.mjs",
     "sticker:add": "node scripts/sticker-add.mjs",
-    "voice": "node scripts/voice.mjs"
+    "voice": "node scripts/voice.mjs",
+    "eval": "node --env-file-if-exists=.env.qq scripts/eval-behavior.mjs",
+    "memory": "node scripts/memory.mjs",
+    "douyin:mentions": "node scripts/douyin-find-mentions.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
