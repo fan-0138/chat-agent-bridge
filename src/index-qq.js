@@ -31,9 +31,16 @@ import { startOneBot } from './transport-onebot.js';
 import { createProactive } from './proactive.js';
 import { createLife } from './life.js';
 import { createMind } from './mind.js';
+import { createAgenda } from './agenda.js';
+import { createRobotInbox } from './robot-inbox.js';
+import { createMemoryStore } from './memory-store.js';
+import { createUsage } from './usage.js';
+import { createHealth } from './health.js';
+import { createNotifier } from './notify-send.js';
 import { createStickers } from './stickers.js';
 import { createVoiceOut } from './voice-out.js';
 import {
+  appendMeal,
   formatMonthReport,
   loadMeals,
   markRunning,
@@ -132,7 +139,17 @@ async function main() {
     log.warn('没有找到 DEEPSEEK_API_KEY，headless 调用模型可能失败。');
   }
 
-  const { runner, chatRunner } = createAgentRunners({ config, log, dshCommand, apiKey: apiKeySource });
+  // 调用次数/字数的统计钩子：模型调一次记一笔（只记次数和字数，不装精确费用）
+  const usage = createUsage({ root: process.cwd(), kind: 'chat', log });
+  const { runner, chatRunner } = createAgentRunners({
+    config,
+    log,
+    dshCommand,
+    apiKey: apiKeySource,
+    usage: (record) => usage.record(record),
+  });
+  // 连续失败会给她喊人：走到 QQ 上，别埋在日志里
+  const health = createHealth({ root: process.cwd(), notify: createNotifier({ root: process.cwd(), log }) });
 
   const memory = createMemory({
     dir: `${dataDir}/qq/memory`,
@@ -163,10 +180,16 @@ async function main() {
   let proactive;
   /** @type {ReturnType<typeof createLife> | undefined} */
   let life;
+  /** @type {ReturnType<typeof createRobotInbox> | undefined} */
+  let robotInbox;
+  /** @type {ReturnType<typeof createAgenda> | undefined} */
+  let agenda;
   /** @type {ReturnType<typeof createMind> | undefined} */
   let mind;
   /** @type {ReturnType<typeof createDouyinChannel> | undefined} */
   let douyinChat;
+  /** @type {ReturnType<typeof createMemoryStore> | undefined} */
+  let recollection;
 
   const transport = await startOneBot({
     config: {
@@ -219,7 +242,12 @@ async function main() {
 
   // 只读她自己的时间（想事、记下的事，以及「想去搜什么」）；真正「想」在 scripts/mind-run.mjs
   // 那个常驻进程里。先建她、再建生活状态：刷抖音时要能从她这儿拿「这次想搜什么」。
-  mind = createMind({ config, persona, root: process.cwd(), log });
+  agenda = createAgenda({ root: process.cwd(), log });
+  robotInbox = createRobotInbox({ root: process.cwd(), log });
+  mind = createMind({ config, persona, root: process.cwd(), log, agenda });
+
+  // 她的记忆：聊天时按他这句话捞旧事（睡前整理在 mind-run 里）
+  recollection = createMemoryStore({ root: process.cwd(), log });
 
   life = createLife({
     config,
@@ -247,6 +275,25 @@ async function main() {
     vision,
     life,
     mind,
+    recollection,
+    agenda,
+    robotInbox,
+    // 她给机器人留了技术问题：给他发一句提醒（10 分钟内只提醒一次，别刷屏）
+    notifyRobotTask: (note) => notifyRobotTask(note),
+    // 聊完戳一下她的循环，让她早点接上（mind-run 每秒扫一次这个文件）
+    nudgeMind: (reason = 'chat') => {
+      try {
+        writeFileSync(resolve(process.cwd(), 'data/mind/nudge.json'), `${JSON.stringify({ at: Date.now(), reason })}\n`);
+      } catch {
+        /* 戳不动就算了，不影响回复 */
+      }
+    },
+    // 她回复里写【吃了：…】时记进同一本饭账
+    meals: {
+      append: (dish) =>
+        appendMeal({ file: resolve(process.cwd(), 'data/life/meals.jsonl'), dish, source: 'self' }),
+    },
+    health,
     sticker,
     sendSticker: transport.sendImage,
     voiceOut,
@@ -294,6 +341,14 @@ async function main() {
   const shutdownFile = resolve(dataDir, 'life/shutdown.json');
   const owner = config.allowList[0];
   const ownerTarget = { senderId: owner, conversationId: `private_${owner}`, groupId: null };
+
+  let lastRobotNoticeAt = 0;
+  async function notifyRobotTask(note) {
+    if (Date.now() - lastRobotNoticeAt < 10 * 60_000) return;
+    lastRobotNoticeAt = Date.now();
+    const line = `（系统）小鲸给机器人留了条子：${String(note ?? '').replace(/\s+/g, ' ').slice(0, 80)}。要处理就跟机器人说一声。`;
+    await sendToOwner(line).catch((error) => log.warn(`机器人提醒发送失败：${error?.message ?? error}`));
+  }
 
   async function sendToOwner(text) {
     if (!owner || config.dryRun) return;

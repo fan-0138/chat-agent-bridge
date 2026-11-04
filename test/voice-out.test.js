@@ -119,3 +119,11 @@ test('情绪参数有默认值，也能被配置覆盖', () => {
   assert.equal(louder.ttsTemperature, 1.2);
   assert.equal(louder.ttsTopK, 20);
 });
+
+test('他点名要语音时 canSpeak 让路（间隔/每日上限都绕开）', () => {
+  const voice = createVoiceOut({
+    config: { voiceOutEnabled: true, edgeTtsBin: process.execPath, voiceOutMinGapMin: 8, voiceOutMaxPerDay: 1 },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(voice.canSpeak(Date.now(), { force: true }).ok, true);
+});

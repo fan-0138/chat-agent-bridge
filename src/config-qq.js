@@ -61,6 +61,8 @@ const DEFAULTS = {
   lifeBrowseMaxPerDay: 3,
   lifeBrowseMinGapMin: 120,
   lifeBrowseChance: 0.3,
+  // 刷不刷抖音改成她自己决定（mind 的「刷」），默认不再由定时器掷骰子
+  lifeAutoBrowse: false,
   lifeBrowseScroll: 6,
   lifeBrowseTimeoutMs: 180_000,
   lifeStateFile: 'data/life/state.json',
@@ -119,6 +121,8 @@ const DEFAULTS = {
   douyinChatMaxPerDay: 200,
   douyinChatDebug: false,
   douyinChatResident: false, // 默认不常驻：查完就关浏览器，省内存
+  douyinChatIdleTickMs: 90_000, // 闲置时多久查一次（默认 90 秒）
+  douyinChatIdleAfterMin: 10, // 多久没私信动静算闲置
   douyinChatHideWindow: true,
   // 无头：连窗口都不存在，最干净（UA 会自动换成真的）
   douyinChatHeadless: false,
@@ -230,6 +234,7 @@ export function loadQqConfig(env = process.env) {
     lifeEnabled: readBool(env, 'QQ_LIFE_ENABLED', DEFAULTS.lifeEnabled),
     lifeTickMs: readInt(env, 'QQ_LIFE_TICK_MS', DEFAULTS.lifeTickMs),
     lifeBrowseMaxPerDay: readInt(env, 'QQ_LIFE_BROWSE_MAX_PER_DAY', DEFAULTS.lifeBrowseMaxPerDay),
+    lifeAutoBrowse: readBool(env, 'QQ_LIFE_AUTO_BROWSE', DEFAULTS.lifeAutoBrowse),
     lifeBrowseMinGapMin: readInt(env, 'QQ_LIFE_BROWSE_MIN_GAP_MIN', DEFAULTS.lifeBrowseMinGapMin),
     lifeBrowseChance: Number(env.QQ_LIFE_BROWSE_CHANCE ?? DEFAULTS.lifeBrowseChance),
     lifeBrowseScroll: readInt(env, 'QQ_LIFE_BROWSE_SCROLL', DEFAULTS.lifeBrowseScroll),
@@ -286,6 +291,8 @@ export function loadQqConfig(env = process.env) {
     douyinChatAllowList: readList(env, 'QQ_DOUYIN_CHAT_ALLOW'),
     douyinChatDebug: readBool(env, 'QQ_DOUYIN_CHAT_DEBUG', DEFAULTS.douyinChatDebug),
     douyinChatResident: readBool(env, 'QQ_DOUYIN_CHAT_RESIDENT', DEFAULTS.douyinChatResident),
+    douyinChatIdleTickMs: readInt(env, 'QQ_DOUYIN_CHAT_IDLE_TICK_MS', DEFAULTS.douyinChatIdleTickMs),
+    douyinChatIdleAfterMin: readInt(env, 'QQ_DOUYIN_CHAT_IDLE_AFTER_MIN', DEFAULTS.douyinChatIdleAfterMin),
     douyinChatHideWindow: readBool(env, 'QQ_DOUYIN_HIDE_WINDOW', DEFAULTS.douyinChatHideWindow),
     douyinChatHeadless: readBool(env, 'QQ_DOUYIN_HEADLESS', DEFAULTS.douyinChatHeadless),
     douyinCdpUrl: env.QQ_DOUYIN_CDP_URL?.trim() || DEFAULTS.douyinCdpUrl,

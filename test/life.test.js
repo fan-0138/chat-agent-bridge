@@ -14,6 +14,8 @@ import {
   formatShare,
   freshShare,
   localDay,
+  parseActivityNote,
+  parseMealNote,
   SHARE_TTL_MIN,
 } from '../src/life.js';
 
@@ -282,4 +284,66 @@ test('prompt 里带上账本数字，别让她凭印象说', async () => {
   assert.match(text, /这个月（2026-11）记了 1 顿/);
   assert.match(text, /上个月（2026-10）2 顿/);
   assert.match(text, /其中爸爸投喂 0 顿/);
+});
+
+
+test('此刻标记：单独一行会被抠掉，只留下状态', () => {
+  const out = parseActivityNote('放下了，手机扣在枕头边。\n【此刻：躺在床上，手机放一边】');
+  assert.equal(out.activity, '躺在床上，手机放一边');
+  assert.equal(out.text, '放下了，手机扣在枕头边。');
+  // 行内混进来也不会发给爸爸
+  const inline = parseActivityNote('放下了【此刻：手机扣着】那我睡了');
+  assert.equal(inline.activity, '手机扣着');
+  assert.doesNotMatch(inline.text, /此刻/);
+  assert.match(inline.text, /放下了/);
+});
+
+test('此刻标记：没有标记就是原样返回', () => {
+  const out = parseActivityNote('在看窗外，没干嘛。');
+  assert.equal(out.activity, '');
+  assert.equal(out.text, '在看窗外，没干嘛。');
+  assert.equal(parseActivityNote('').text, '');
+  assert.equal(parseActivityNote(null).text, '');
+});
+
+test('她说放下手机，生活状态就真的跟着改（房间下一轮都看这个）', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createLife } = await import('../src/life.js');
+  const root = await mkdtemp(join(tmpdir(), 'life-note-'));
+  try {
+    let clock = atHour(23);
+    const life = createLife({ config, root, log: { debug() {}, info() {}, warn() {} }, now: () => clock });
+    await life.load();
+    const noted = await life.noteActivity('躺在床上，手机扣在枕头边', 90);
+    assert.equal(noted.label, '躺在床上，手机扣在枕头边');
+    assert.equal(noted.fromRecord, true);
+
+    // 读回来也是这条（房间 server 走的是另一个实例）
+    const again = createLife({ config, root, log: { debug() {}, info() {}, warn() {} }, now: () => clock });
+    await again.load();
+    const peeked = await again.peek();
+    assert.equal(peeked.activity.label, '躺在床上，手机扣在枕头边');
+    assert.equal(peeked.activity.fromRecord, true);
+
+    // TTL 过了退回时段默认
+    clock += 91 * 60_000;
+    assert.equal((await again.peek()).activity.fromRecord, false);
+    assert.equal(await life.noteActivity('   ', 90), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('吃了标记：抠掉那行，菜名留下', () => {
+  const out = parseMealNote('刚吃完，撑得不行。\n【吃了：火锅】');
+  assert.equal(out.meal, '火锅');
+  assert.equal(out.text, '刚吃完，撑得不行。');
+  const inline = parseMealNote('吃了【吃了：泡面】还行');
+  assert.equal(inline.meal, '泡面');
+  assert.doesNotMatch(inline.text, /吃了：/);
+  assert.equal(parseMealNote('今天没吃').meal, '');
+  assert.equal(parseMealNote('').meal, '');
 });

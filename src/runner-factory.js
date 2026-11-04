@@ -8,7 +8,7 @@
 import { createDshRunner } from './dsh.js';
 import { createOpenAiRunner } from './openai-runner.js';
 
-export function createAgentRunners({ config, log, dshCommand, apiKey }) {
+export function createAgentRunners({ config, log, dshCommand, apiKey, usage }) {
   const backend = String(config.agentBackend ?? 'dsh').toLowerCase();
 
   if (backend === 'openai') {
@@ -30,6 +30,7 @@ export function createAgentRunners({ config, log, dshCommand, apiKey }) {
     cwd: config.agentCwd,
     timeoutMs: config.agentTimeoutMs,
     permissionMode: config.agentPermissionMode,
+    usage,
     log,
   });
   // 聊天用短超时：真人不会让你等三分钟
@@ -40,6 +41,7 @@ export function createAgentRunners({ config, log, dshCommand, apiKey }) {
     cwd: config.agentCwd,
     timeoutMs: config.agentChatTimeoutMs ?? config.agentTimeoutMs,
     permissionMode: config.agentPermissionMode,
+    usage,
     log,
   });
   log.info(`模型后端：dsh（profile=${config.agentProfile}）`);

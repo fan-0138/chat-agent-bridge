@@ -75,6 +75,37 @@ export function defaultActivity(hour) {
   return { label: '在机柜里睡觉', ttlMin: 240 };
 }
 
+/**
+ * 她回复里可以带一行状态：`【此刻：躺在床上，手机扣在枕头边】`。
+ * 桥接会把这一行从发出去的话里去掉，只写进生活状态 —— 于是「她说放下了」房间也真的放下。
+ * 没写就是没变；不写也能正常回。只认整行的标记，正文里提到「此刻」不会误伤。
+ * @param {string} text
+ * @returns {{ text: string, activity: string }}
+ */
+export function parseActivityNote(text) {
+  const source = String(text ?? '');
+  const match = source.match(/[【\[]\s*此刻\s*[:：]\s*([^】\]\n]{1,40}?)\s*[】\]]/);
+  if (!match) return { text: source.trim(), activity: '' };
+  const activity = match[1].replace(/\s+/g, ' ').trim();
+  const stripped = source.replace(match[0], '').replace(/\n{3,}/g, '\n\n').trim();
+  return { text: stripped, activity };
+}
+
+/**
+ * 她回复里可以带一行「吃了什么」：`【吃了：火锅】`。
+ * 桥接会把这行从发出去的话里去掉，记进饭账本（和 dad 喂饭同一本账）。
+ * @param {string} text
+ * @returns {{ text: string, meal: string }}
+ */
+export function parseMealNote(text) {
+  const source = String(text ?? '');
+  const match = source.match(/[【\[]\s*吃了\s*[:：]\s*([^】\]\n]{1,40}?)\s*[】\]]/);
+  if (!match) return { text: source.trim(), meal: '' };
+  const meal = match[1].replace(/\s+/g, ' ').trim();
+  const stripped = source.replace(match[0], '').replace(/\n{3,}/g, '\n\n').trim();
+  return { text: stripped, meal };
+}
+
 /** 当前活动：优先用记录里的，过期了退回到时段默认值。 */
 export function currentActivity(state, now = Date.now()) {
   const hour = new Date(now).getHours();
@@ -433,6 +464,11 @@ export function createLife({ config, log, root = process.cwd(), isBusy, takeSear
       log?.debug('正在回主人消息，这次不去刷抖音');
       return;
     }
+    if (config.lifeAutoBrowse === false) {
+      // 由她自己决定要不要刷（mind 的「刷」），这里不再定时掷骰子
+      log?.debug('自动刷抖音已关：等她自己想刷');
+      return;
+    }
     const verdict = decideBrowse({ state, now: now(), config });
     if (!verdict.act) {
       log?.debug(`这次不刷抖音：${verdict.reason}`);
@@ -482,6 +518,18 @@ export function createLife({ config, log, root = process.cwd(), isBusy, takeSear
             `上个月（${prev}）${last.count} 顿。` +
             '（他问「记了几顿 / 喂饭记录」就以这里为准，别说错月份、也别编。）',
         );
+        // 今天具体吃了什么：饭账里有自动记的、也有她自己说的。
+        // 不给她看，她就会否认自己吃过的饭（空间/房间显示的和她嘴上说的对不上）。
+        const today = localDay(now());
+        const todays = rows.filter((row) => String(row.day ?? '') === today);
+        if (todays.length) {
+          const list = todays.map((row) => `${row.slot}${row.dish}`).join('、');
+          parts.push(
+            `[今天吃了] ${list}\n` +
+              '（这是今天的饭账。他问「晚饭吃的什么」「今天吃了啥」就照这个说；' +
+              '别否认、也别编账本里没有的。）',
+          );
+        }
       } catch {
         /* 账本读不到就不提，别让一句话拖垮整轮 */
       }
@@ -519,6 +567,17 @@ export function createLife({ config, log, root = process.cwd(), isBusy, takeSear
       if (!state.pendingShare) return;
       state.pendingShare = null;
       await save();
+    },
+
+    /** 她自己说此刻在干嘛（聊天里的【此刻：…】）——写进生活状态，房间和下一轮都会变。 */
+    async noteActivity(label, ttlMin = 90) {
+      await load();
+      const clean = String(label ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (!clean) return null;
+      const ttl = Math.min(240, Math.max(5, Number(ttlMin) || 90));
+      setActivity(clean, ttl);
+      await save();
+      return currentActivity(state, now());
     },
 
     /** 只看不用，用于日志/测试。 */

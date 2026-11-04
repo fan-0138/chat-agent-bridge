@@ -39,6 +39,8 @@ export function createMemory({ dir, maxTurns, maxChars, log }) {
           // 主动消息要标出来：不然她一天发的十来条「刚刷到」会把他的消息挤出上下文，
           // 看着就像她记不住他说过什么。
           ...(typeof entry.kind === 'string' && entry.kind ? { kind: entry.kind } : {}),
+          // 谁说的：爸爸本人 / 爸爸的智能机器人（同一个 QQ 号转达，别混成一个人）
+          ...(typeof entry.name === 'string' && entry.name ? { name: entry.name } : {}),
         }));
     } catch (error) {
       if (error.code !== 'ENOENT') log.warn(`读取记忆失败 ${file}: ${error.message}`);

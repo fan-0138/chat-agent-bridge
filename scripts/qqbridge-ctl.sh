@@ -24,7 +24,11 @@ LABEL=local.chat-agent-bridge.qqbridge
 REMIND_LABEL=local.chat-agent-bridge.remind
 NETWATCH_LABEL=local.chat-agent-bridge.netwatch
 ROOM_LABEL=local.chat-agent-bridge.room
+MC_LABEL=local.chat-agent-bridge.mcserver
+MC_BODY_LABEL=local.chat-agent-bridge.mcbody
 ROOM_PORT=${ROOM_PORT:-8770}
+MC_PORT=${MC_PORT:-25565}
+MC_BODY_PORT=${MC_BODY_PORT:-8772}
 TTS_PORT=${TTS_PORT:-9880}
 TTS_DIR=${TTS_DIR:-$HOME/Documents/deepseek/tts/GPT-SoVITS}
 PLIST="$LA/$LABEL.plist"
@@ -46,6 +50,9 @@ room_pid()   { lsof -nP -tiTCP:"$ROOM_PORT" -sTCP:LISTEN 2>/dev/null | head -1; 
 tts_pid()    { lsof -nP -tiTCP:"$TTS_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
 # 「她自己的时间」是个独立 node 进程，没有端口，按命令行认
 mind_pid()   { ps -axo pid=,args= | awk '$2=="node" && /scripts\/mind-run\.mjs/ {print $1; exit}'; }
+# 她的 Minecraft：服务端和身体都按端口认
+mc_server_pid() { lsof -nP -tiTCP:"$MC_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
+mc_body_pid()   { lsof -nP -tiTCP:"$MC_BODY_PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
 
 running() { [ -n "$(node_pid)" ]; }
 not_running() { ! running; }
@@ -59,6 +66,10 @@ not_tts_running() { ! tts_running; }
 not_remind_running() { ! remind_running; }
 not_watch_running() { ! watch_running; }
 not_room_running() { ! room_running; }
+mc_server_running() { [ -n "$(mc_server_pid)" ]; }
+mc_body_running() { [ -n "$(mc_body_pid)" ]; }
+mc_running() { mc_server_running && mc_body_running; }
+not_mc_running() { ! mc_running; }
 
 loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
 job_pid() { launchctl print "$DOMAIN/$1" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3; exit}'; }
@@ -247,17 +258,17 @@ stop_mind() {
 
 start_room() {
   if [ ! -f tools/room/server.mjs ]; then
-    log "跳过小鲸的房间：这里没有 tools/room（自用功能，不在开源仓库里）"
+    log "跳过小鲸的小空间：这里没有 tools/room（自用功能，不在开源仓库里）"
     return 0
   fi
   if room_running; then
-    log "小鲸的房间已经在跑：http://127.0.0.1:$ROOM_PORT"
+    log "小鲸的小空间已经在跑：http://127.0.0.1:$ROOM_PORT"
     return 0
   fi
   if [ -f "$LA/$ROOM_LABEL.plist" ]; then
     if start_one "$ROOM_LABEL" && wait_until room_running 20; then
       echo "$(room_pid)" > logs/room.pid
-      log "小鲸的房间已启动（launchd 托管）：http://127.0.0.1:$ROOM_PORT"
+      log "小鲸的小空间已启动（launchd 托管）：http://127.0.0.1:$ROOM_PORT"
       return 0
     fi
     log "launchd 20 秒内没拉起房间服务（大概率是 TCC 不让后台任务读 ~/Documents），改用脱钩方式。"
@@ -267,7 +278,7 @@ start_room() {
   nohup node tools/room/server.mjs >> logs/room.log 2>&1 &
   if wait_until room_running 10; then
     echo "$(room_pid)" > logs/room.pid
-    log "小鲸的房间已启动（脱钩方式，重启电脑后要再起一次）：http://127.0.0.1:$ROOM_PORT"
+    log "小鲸的小空间已启动（脱钩方式，重启电脑后要再起一次）：http://127.0.0.1:$ROOM_PORT"
     return 0
   fi
   log "房间没起来，看 logs/room.log"
@@ -284,7 +295,47 @@ stop_room() {
     _did=1
   fi
   rm -f logs/room.pid
-  [ "$_did" = "1" ] && log "小鲸的房间已停止。" || log "小鲸的房间本来就没在跑。"
+  [ "$_did" = "1" ] && log "小鲸的小空间已停止。" || log "小鲸的小空间本来就没在跑。"
+}
+
+start_mc() {
+  if [ ! -f tools/mc/body.mjs ]; then
+    log "跳过 Minecraft：这里没有 tools/mc（自用功能，不在开源仓库里）"
+    return 0
+  fi
+  if mc_running; then
+    log "小鲸的 Minecraft 已经在跑：http://127.0.0.1:$MC_BODY_PORT/view"
+    return 0
+  fi
+  if loaded "$MC_LABEL" || loaded "$MC_BODY_LABEL"; then
+    loaded "$MC_LABEL" || start_one "$MC_LABEL" >/dev/null 2>&1
+    loaded "$MC_BODY_LABEL" || start_one "$MC_BODY_LABEL" >/dev/null 2>&1
+    if wait_until mc_running 60; then
+      log "小鲸的 Minecraft 已启动（launchd 托管）：http://127.0.0.1:$MC_BODY_PORT/view"
+      return 0
+    fi
+    log "launchd 60 秒内没拉起来，改用脱钩方式。"
+  fi
+  sh tools/mc/mc-ctl.sh start >/dev/null 2>&1
+  if wait_until mc_running 60; then
+    log "小鲸的 Minecraft 已启动（脱钩方式，重启电脑后要再起一次）"
+    return 0
+  fi
+  log "Minecraft 没起来，看 logs/mc-server.log / logs/mc-body.log"
+  return 1
+}
+
+stop_mc() {
+  _did=0
+  stop_one "$MC_BODY_LABEL" && _did=1
+  stop_one "$MC_LABEL" && _did=1
+  if command -v sh >/dev/null 2>&1 && [ -f tools/mc/mc-ctl.sh ]; then
+    sh tools/mc/mc-ctl.sh stop >/dev/null 2>&1
+  fi
+  _b=$(mc_body_pid); [ -n "$_b" ] && { kill -TERM "$_b" 2>/dev/null; _did=1; }
+  _s=$(mc_server_pid); [ -n "$_s" ] && { kill -TERM "$_s" 2>/dev/null; _did=1; }
+  wait_until not_mc_running 30
+  [ "$_did" = "1" ] && log "小鲸的 Minecraft 已停止。" || log "小鲸的 Minecraft 本来就没在跑。"
 }
 
 stop_bridge() {
@@ -351,7 +402,18 @@ status() {
   else
     log "  没在跑"
   fi
-  log "── 小鲸的房间 ──"
+  log "── 小鲸的 Minecraft ──"
+  if mc_server_running; then
+    log "  服务端：运行中（端口 $MC_PORT）"
+  else
+    log "  服务端：没在跑"
+  fi
+  if mc_body_running; then
+    log "  身体：运行中，看这里 http://127.0.0.1:$MC_BODY_PORT/view"
+  else
+    log "  身体：没在跑"
+  fi
+  log "── 小鲸的小空间 ──"
   if room_running; then
     log "  运行中：http://127.0.0.1:$ROOM_PORT（node $(room_pid)）"
     if loaded "$ROOM_LABEL"; then
@@ -365,11 +427,11 @@ status() {
 }
 
 case "${1:-status}" in
-  start)     start_bridge; start_tts; start_mind; start_room ;;
-  stop)      stop_bridge; stop_tts; stop_mind; stop_room ;;
-  restart)   stop_bridge; stop_tts; stop_room; stop_mind; sleep 1; start_bridge; start_tts; start_mind; start_room ;;
+  start)     start_bridge; start_tts; start_mind; start_room; start_mc ;;
+  stop)      stop_bridge; stop_tts; stop_mind; stop_room; stop_mc ;;
+  restart)   stop_bridge; stop_tts; stop_room; stop_mind; stop_mc; sleep 1; start_bridge; start_tts; start_mind; start_room; start_mc ;;
   status)    status ;;
-  start-all) start_bridge; start_remind; start_watch; start_tts; start_mind; start_room ;;
+  start-all) start_bridge; start_remind; start_watch; start_tts; start_mind; start_room; start_mc ;;
   stop-all)
     stop_bridge
     _stopped_remind=0
@@ -390,9 +452,10 @@ case "${1:-status}" in
     stop_tts
     stop_mind
     stop_room
+    stop_mc
     ;;
   *)
-    log "用法：$0 {start|stop|restart|status|start-all|stop-all}（start/stop 会把声音复刻、她自己的时间、小鲸的房间一起带上）"
+    log "用法：$0 {start|stop|restart|status|start-all|stop-all}（start/stop 会把声音复刻、她自己的时间、小鲸的小空间、她的 Minecraft 一起带上）"
     exit 2
     ;;
 esac

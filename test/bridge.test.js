@@ -26,7 +26,7 @@ function makeConfig(overrides = {}) {
   };
 }
 
-async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, sticker, sendSticker, mind } = {}) {
+async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, sticker, sendSticker, mind, life, recollection, meals, agenda, robotInbox, notifyRobotTask } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'bridge-'));
   const memory = createMemory({ dir, maxTurns: 6, maxChars: 2000, log: silentLog });
   const sent = [];
@@ -48,6 +48,12 @@ async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, s
     sticker,
     sendSticker,
     mind,
+    life,
+    recollection,
+    meals,
+    agenda,
+    robotInbox,
+    notifyRobotTask,
     sendVoice: async (_target, buffer, meta) => voices.push({ size: buffer.length, ...meta }),
     reply: async (_target, text) => sent.push(text),
     vision:
@@ -673,4 +679,198 @@ test('问句不会被晾着', async () => {
   await sleepMs(150);
   assert.equal(prompts.length, 1);
   assert.equal(sent.length, 1);
+});
+
+
+test('她写了【此刻：…】：那行不发出去，只改生活状态', async () => {
+  const noted = [];
+  const life = {
+    promptSection: async () => '现在 23:58。你正在：准备睡了但还赖着刷手机。',
+    noteActivity: async (label) => noted.push(label),
+  };
+  const { bridge, sent } = await setup({
+    life,
+    runner: {
+      async run() {
+        return { text: '放下了，手机扣在枕头边。\n【此刻：躺在床上，手机放一边】', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, text: '放下手机，睡觉' });
+  await new Promise((r) => setTimeout(r, 30));
+  // 聊天中会先标一次「在手机上跟你聊天」，她自己的【此刻】再盖掉
+  assert.ok(noted.includes('躺在床上，手机放一边'));
+  assert.equal(noted.at(-1), '躺在床上，手机放一边');
+  assert.deepEqual(sent, ['放下了，手机扣在枕头边。']);
+  assert.doesNotMatch(sent[0], /此刻/);
+});
+
+test('没有标记就照常回，生活状态只标成聊天中', async () => {
+  const noted = [];
+  const life = { promptSection: async () => '现在 20:00。你正在：在工位发呆。', noteActivity: async (label) => noted.push(label) };
+  const { bridge, sent } = await setup({
+    life,
+    runner: { async run() { return { text: '在呢，怎么了？', durationMs: 5 }; } },
+  });
+  await bridge.handle({ ...baseMsg });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(noted, ['在手机上跟你聊天']);
+  assert.deepEqual(sent, ['在呢，怎么了？']);
+});
+
+
+test('记忆：他这句话勾起旧事，就拼进 prompt；没勾到就不加', async () => {
+  const prompts = [];
+  const recollection = {
+    promptSection: async (text) =>
+      String(text).includes('西瓜') ? '[你记得的事（以前留下的，不是他刚说的）]\n- 11/02 他说过：西瓜别放冰箱太久' : '',
+  };
+  const { bridge } = await setup({
+    recollection,
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '记得，放桌上就行。', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-mem-1', text: '西瓜还能放冰箱吗' });
+  assert.match(prompts[0], /西瓜别放冰箱太久/);
+
+  await bridge.handle({ ...baseMsg, id: 'm-mem-2', text: '今天好热' });
+  assert.doesNotMatch(prompts[1], /西瓜别放冰箱太久/);
+});
+
+
+test('模型把【语音】写在句子中间：那三个字绝不能漏给爸爸', async () => {
+  const { bridge, sent } = await setup({
+    runner: {
+      async run() {
+        return { text: '感冒了人家可不管【语音】快去擦干。', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-vmark' });
+  assert.equal(sent.length, 1);
+  assert.doesNotMatch(sent[0], /【语音】/);
+  assert.match(sent[0], /感冒了人家可不管/);
+});
+
+
+test('她写了【吃了：…】：不发出去，记进饭账', async () => {
+  const dishes = [];
+  const { bridge, sent } = await setup({
+    meals: { append: async (dish) => dishes.push(dish) },
+    runner: {
+      async run() {
+        return { text: '刚吃完，撑。\n【吃了：火锅】', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'm-meal' });
+  assert.deepEqual(dishes, ['火锅']);
+  assert.deepEqual(sent, ['刚吃完，撑。']);
+  assert.doesNotMatch(sent[0], /吃了：/);
+});
+
+/* ── 他点名要语音时的破例（2026-11-04） ───────────────── */
+
+test('他明确要语音时，不再被「离上一条不到 8 分钟」拦住', async () => {
+  const voiceOut = {
+    canSpeak: (_at, opts) => (opts?.force ? { ok: true, forced: true } : { ok: false, reason: '离上一条语音不到 8 分钟' }),
+    speak: async () => ({ silk: Buffer.from([1, 2, 3, 4]), durationMs: 320 }),
+  };
+  const { bridge, voices, sent } = await setup({
+    voiceOut,
+    runner: { async run() { return { text: '【语音】爸爸晚安', durationMs: 5 }; } },
+  });
+  await bridge.handle({ ...baseMsg, id: 'v-force', text: '发条语音给我听听' });
+  assert.equal(voices.length, 1);
+  assert.equal(voices[0].text, '爸爸晚安');
+  assert.equal(sent.some((line) => line.includes('爸爸晚安')), false);
+});
+
+test('没点名要语音时，间隔限制照旧：降级成文字', async () => {
+  const voiceOut = {
+    canSpeak: () => ({ ok: false, reason: '离上一条语音不到 8 分钟' }),
+    speak: async () => ({ silk: Buffer.from([1]), durationMs: 100 }),
+  };
+  const { bridge, voices, sent } = await setup({
+    voiceOut,
+    runner: { async run() { return { text: '【语音】爸爸晚安', durationMs: 5 }; } },
+  });
+  await bridge.handle({ ...baseMsg, id: 'v-blocked', text: '今天好累' });
+  assert.equal(voices.length, 0);
+  assert.equal(sent.some((line) => line.includes('爸爸晚安')), true);
+});
+
+/* ── 她自己在聊天里写记忆（2026-11-04） ───────────────── */
+
+test('【记住：…】不发给爸爸，写进记忆', async () => {
+  const notes = [];
+  const recollection = {
+    async promptSection() { return ''; },
+    async addNote(row) { notes.push(row); },
+  };
+  const { bridge, sent } = await setup({
+    recollection,
+    runner: { async run() { return { text: '好呀，记下了。\n【记住：爸爸喜欢我撒娇但是别太长】', durationMs: 5 }; } },
+  });
+  await bridge.handle({ ...baseMsg, id: 'note-1' });
+  assert.equal(sent.some((line) => line.includes('【记住')), false);
+  assert.ok(sent.some((line) => line.includes('记下了')));
+  assert.equal(notes.length, 1);
+  assert.match(notes[0].text, /爸爸喜欢我撒娇/);
+});
+
+test('聊天的时候她的「此刻」变成在聊天，房间不会还挂着旧状态', async () => {
+  const noted = [];
+  const life = {
+    async promptSection() { return ''; },
+    async noteActivity(label, ttl) { noted.push({ label, ttl }); return { label }; },
+  };
+  const { bridge } = await setup({ life, runner: { async run() { return { text: '在呢', durationMs: 5 }; } } });
+  await bridge.handle({ ...baseMsg, id: 'life-chat-1', text: '在干嘛' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(noted.some((row) => /聊天/.test(row.label) && row.ttl >= 10));
+});
+
+/* ── 她顺手记待办 / 划掉（2026-11-04） ───────────────── */
+
+test('【待办：…】和【做完：…】不发给爸爸，写进她手上的事', async () => {
+  const added = [];
+  const closed = [];
+  const agenda = {
+    async add(row) { added.push(row); },
+    async closeByText(text) { closed.push(text); },
+    async promptSection() { return ''; },
+  };
+  const { bridge, sent } = await setup({
+    agenda,
+    runner: { async run() { return { text: '行，明天弄。\n【待办：把视频重剪一版】【做完：屋顶补檐角】', durationMs: 5 }; } },
+  });
+  await bridge.handle({ ...baseMsg, id: 'agenda-1' });
+  assert.equal(sent.some((line) => line.includes('【')), false);
+  assert.equal(added.length, 1);
+  assert.match(added[0].text, /视频重剪/);
+  assert.deepEqual(closed, ['屋顶补檐角']);
+});
+
+/* ── 她找机器人（2026-11-04） ───────────────── */
+
+test('【找机器人：…】不发给爸爸，写进技术收件箱并提醒爸爸', async () => {
+  const rows = [];
+  const notices = [];
+  const robotInbox = { async add(row) { rows.push(row); } };
+  const { bridge, sent } = await setup({
+    robotInbox,
+    notifyRobotTask: (note) => notices.push(note),
+    runner: { async run() { return { text: '好，我记下来了。\n【找机器人：剪视频脚本报错 ffmpeg 找不到】', durationMs: 5 }; } },
+  });
+  await bridge.handle({ ...baseMsg, id: 'robot-1' });
+  assert.equal(sent.some((line) => line.includes('【')), false);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].text, /ffmpeg/);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /ffmpeg/);
 });

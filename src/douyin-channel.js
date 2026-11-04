@@ -74,6 +74,12 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
   let lastNoticeAt = 0;
   let lastFullCheckAt = 0;
   let lastHeartbeatAt = 0;
+  /** 最近一次真的有人发私信/我们回了私信；闲置超过 10 分钟就把轮询放慢 */
+  let lastDmActivityAt = Date.now();
+  /** 上一轮完整检查的时间（闲置放慢用） */
+  let lastRoundAt = 0;
+  /** 页面第一次出现的时间：清掉脚本跑剩/卡死的页面用 */
+  const straySeenAt = new Map();
 
   /** @type {Set<string>} */
   let seen = new Set();
@@ -224,6 +230,41 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
     const applied = await session.send('Browser.getWindowBounds', { windowId });
     if (config.douyinChatDebug) log.info(`窗口位置：${JSON.stringify(applied.bounds)}`);
     await session.detach().catch(() => {});
+  }
+
+  /**
+   * 清掉「不是她这一轮在用」的抖音页面：
+   *  - 脚本被超时杀掉时会留下视频页/精选页；卡死的渲染进程还会把整个浏览器拖慢
+   *  - 超过 8 分钟的、或者响应不了（evaluate 超时）的，直接关
+   * 只动抖音页面，绝不碰桥接当前这一页。
+   */
+  async function sweepStrayPages() {
+    if (!context) return 0;
+    const keep = page && !page.isClosed?.() ? page : null;
+    let closed = 0;
+    const now = Date.now();
+    const seen = new Set();
+    for (const target of context.pages()) {
+      seen.add(target);
+      if (target === keep) continue;
+      const url = String(target.url?.() ?? '');
+      if (!url.startsWith('http') || !url.includes('douyin.com')) continue;
+      if (!straySeenAt.has(target)) straySeenAt.set(target, now);
+      const age = now - (straySeenAt.get(target) ?? now);
+      if (age < 8 * 60_000) continue; // 8 分钟内先不动：可能是她正在跑的脚本（她的回合最长 180 秒）
+      try {
+        // 卡死的页面 close 可能一直不返回，给它 3 秒；不成下一轮再来
+        await Promise.race([target.close({ runBeforeUnload: false }), sleep(3_000)]);
+        closed += 1;
+      } catch {
+        /* 关不掉就算了，下一轮再试 */
+      }
+      straySeenAt.delete(target);
+    }
+    // 已经自己消失的页面，把记录一起清掉
+    for (const tracked of straySeenAt.keys()) if (!seen.has(tracked)) straySeenAt.delete(tracked);
+    if (closed > 0) log.info(`抖音私信：清掉 ${closed} 个卡住的页面`);
+    return closed;
   }
 
   async function closeBrowser() {
@@ -598,7 +639,12 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
   /** 失败过的消息别每 90 秒重试一次：同一句话 10 分钟内只试一回 */
   const retryAfter = new Map();
 
+  function noteDmActivity() {
+    lastDmActivityAt = Date.now();
+  }
+
   async function handleConversation(conversation) {
+    noteDmActivity();
     const name = conversation?.name ?? '对方';
     const identity = conversation?.key ?? name;
     const list = await readMessages(); // 最新的在前
@@ -717,6 +763,7 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
    * 所以走请求/响应文件：data/douyin/browse-request.json → browse-result.json
    */
   async function runBrowse({ likeCount = 0, query = '' } = {}) {
+    noteDmActivity();
     const items = new Map();
     const browsePage = await newHiddenPage();
     const handler = (response) => {
@@ -951,6 +998,7 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
 
   /** 出站队列：别的进程/脚本想让她在抖音里说一句话，就写进这个文件。 */
   async function flushOutbox() {
+    noteDmActivity();
     const file = resolve(process.cwd(), 'data/douyin/outbox.jsonl');
     let raw = '';
     try {
@@ -1172,9 +1220,16 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
 
   async function tick() {
     if (running || stopped) return;
+    // 闲置放慢：10 分钟没私信动静时，没必要每 30 秒开一次页面干活
+    const idleMs = Number(config.douyinChatIdleTickMs ?? 0);
+    const idleAfterMs = Number(config.douyinChatIdleAfterMin ?? 10) * 60_000;
+    if (idleMs > 0 && Date.now() - lastDmActivityAt > idleAfterMs && Date.now() - lastRoundAt < idleMs) {
+      return;
+    }
     running = true;
     try {
       if (!(await ensureBrowser())) return;
+      await sweepStrayPages();
       log.debug('[dm] tick start');
 
       // 便宜的活先干：通知是页面里一次 fetch，10 分钟一次
@@ -1239,6 +1294,7 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
       }
     } finally {
       running = false;
+      lastRoundAt = Date.now();
       // 非常驻模式：查完就关，别一直占着内存和 Dock 图标
       if (!config.douyinChatResident) await closeBrowser();
     }

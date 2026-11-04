@@ -54,6 +54,7 @@ export function parseVoiceSegments(text) {
 
   for (const line of source.split('\n')) {
     const trimmed = line.trim();
+    // 只有行首的「【语音】」才算指令；写在句子中间算正文（她偶尔会提到这个词）
     if (trimmed.startsWith(VOICE_MARKER)) {
       flushText();
       const body = trimmed.slice(VOICE_MARKER.length).trim();
@@ -163,9 +164,18 @@ export function createVoiceOut({
 
   const unavailable = reasonUnavailable();
 
-  function canSpeak(at = now()) {
+  function canSpeak(at = now(), { force = false } = {}) {
     const unavailableReason = reasonUnavailable();
     if (unavailableReason) return { ok: false, reason: unavailableReason };
+    // 他明确要一条语音：间隔和每日上限都让路（只留一个防手滑的硬上限）
+    if (force) {
+      const cutoff = at - DAY_MS;
+      hits = hits.filter((stamp) => stamp > cutoff);
+      if (maxPerDay > 0 && hits.length >= maxPerDay * 3) {
+        return { ok: false, reason: `今天语音太多了（${hits.length} 条）` };
+      }
+      return { ok: true, forced: true };
+    }
 
     const cutoff = at - DAY_MS;
     hits = hits.filter((stamp) => stamp > cutoff);
@@ -184,9 +194,14 @@ export function createVoiceOut({
    * @param {string} raw
    * @returns {Promise<{silk: Buffer, durationMs: number, text: string}>}
    */
-  async function speak(raw) {
+  async function speak(raw, { force = false } = {}) {
     const reason = reasonUnavailable();
     if (reason) throw new Error(reason);
+    if (force) {
+      const cutoff = now() - DAY_MS;
+      hits = hits.filter((stamp) => stamp > cutoff);
+      if (maxPerDay > 0 && hits.length >= maxPerDay * 3) throw new Error('今天语音太多了，明天再说');
+    }
 
     const text = speakableText(raw).slice(0, maxChars);
     if (!text) throw new Error('没有可念的内容');

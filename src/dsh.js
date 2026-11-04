@@ -68,10 +68,21 @@ export function tidyOutput(text) {
  *   cwd: string,
  *   timeoutMs: number,
  *   log: {debug: Function, info: Function, warn: Function, error: Function},
+ *   usage?: (record: {ms: number, inChars: number, outChars: number, ok: boolean}) => any,
  * }} options
  */
 export function createDshRunner(options) {
-  const { command, profile, cwd, timeoutMs, apiKey, log } = options;
+  const { command, profile, cwd, timeoutMs, apiKey, log, usage } = options;
+
+  /** 记一笔用量：成功/失败/超时都算；统计出问题绝不能影响聊天。 */
+  async function noteUsage(record) {
+    if (typeof usage !== 'function') return;
+    try {
+      await usage(record);
+    } catch (error) {
+      log?.warn?.(`用量没记上：${String(error?.message ?? error)}`);
+    }
+  }
 
   /**
    * @param {string} prompt
@@ -96,59 +107,64 @@ export function createDshRunner(options) {
 
   async function runOnce(prompt, runOptions = {}) {
     const started = Date.now();
-    const args = ['--profile', profile, prompt];
-
-    log.debug(`spawn ${command} --profile ${profile} <${prompt.length} chars>`);
-
-    const env = cleanEnv(process.env);
-    // apiKey 可能是函数：每次 spawn 现取，主人换完 key 不用重启桥接
-    const resolvedApiKey = typeof apiKey === 'function' ? await apiKey() : apiKey;
-    if (resolvedApiKey) env.DEEPSEEK_API_KEY ??= resolvedApiKey;
-    // cleanEnv 会把 DSH_* 全过滤掉，所以沙箱档位得在这里显式塞回去。
-    // danger-full-access 同时让审批策略变 never（headless 没人能点同意，ask 就等于拒绝）。
-    if (options.permissionMode) env.DSH_PERMISSION_MODE = options.permissionMode;
-
-    const child = spawn(command, args, {
-      cwd,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true, // 独立进程组，超时可整组杀掉
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let overflow = false;
-
-    const capture = (chunk, into) => {
-      if (into.length > MAX_CAPTURE_BYTES) {
-        overflow = true;
-        return;
-      }
-      into += chunk.toString('utf8');
-      return into;
-    };
-
-    child.stdout.on('data', (chunk) => {
-      stdout = capture(chunk, stdout);
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr = capture(chunk, stderr);
-    });
-
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killTree(child, 'SIGTERM');
-      setTimeout(() => killTree(child, 'SIGKILL'), 5_000).unref();
-    }, timeoutMs);
-    timer.unref();
-
+    let child = null;
+    let timer = null;
+    let text = ''; // 成功时的回复；失败/超时留空，用量里看得出没有产出
+    let ok = false;
     const onAbort = () => {
-      killTree(child, 'SIGTERM');
+      if (child) killTree(child, 'SIGTERM');
     };
-    runOptions.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
+      const args = ['--profile', profile, prompt];
+
+      log.debug(`spawn ${command} --profile ${profile} <${prompt.length} chars>`);
+
+      const env = cleanEnv(process.env);
+      // apiKey 可能是函数：每次 spawn 现取，主人换完 key 不用重启桥接
+      const resolvedApiKey = typeof apiKey === 'function' ? await apiKey() : apiKey;
+      if (resolvedApiKey) env.DEEPSEEK_API_KEY ??= resolvedApiKey;
+      // cleanEnv 会把 DSH_* 全过滤掉，所以沙箱档位得在这里显式塞回去。
+      // danger-full-access 同时让审批策略变 never（headless 没人能点同意，ask 就等于拒绝）。
+      if (options.permissionMode) env.DSH_PERMISSION_MODE = options.permissionMode;
+
+      child = spawn(command, args, {
+        cwd,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true, // 独立进程组，超时可整组杀掉
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let overflow = false;
+
+      const capture = (chunk, into) => {
+        if (into.length > MAX_CAPTURE_BYTES) {
+          overflow = true;
+          return;
+        }
+        into += chunk.toString('utf8');
+        return into;
+      };
+
+      child.stdout.on('data', (chunk) => {
+        stdout = capture(chunk, stdout);
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr = capture(chunk, stderr);
+      });
+
+      let timedOut = false;
+      timer = setTimeout(() => {
+        timedOut = true;
+        killTree(child, 'SIGTERM');
+        setTimeout(() => killTree(child, 'SIGKILL'), 5_000).unref();
+      }, timeoutMs);
+      timer.unref();
+
+      runOptions.signal?.addEventListener('abort', onAbort, { once: true });
+
       const { code, signal } = await new Promise((resolve, reject) => {
         child.once('error', reject);
         child.once('close', (exitCode, exitSignal) => resolve({ code: exitCode, signal: exitSignal }));
@@ -175,14 +191,17 @@ export function createDshRunner(options) {
         throw new DshError('DSH 输出过大，已中止', { durationMs });
       }
 
-      const text = tidyOutput(stdout);
+      text = tidyOutput(stdout);
       if (!text) {
         throw new DshError('DSH 没有返回任何文本', { durationMs });
       }
+      ok = true;
       return { text, durationMs };
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       runOptions.signal?.removeEventListener?.('abort', onAbort);
+      // 这次尝试不论成败都记一笔（重试时每次尝试各记一次）
+      await noteUsage({ ms: Date.now() - started, inChars: prompt.length, outChars: text.length, ok });
     }
   }
 

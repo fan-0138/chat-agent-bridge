@@ -7,8 +7,23 @@ import { DshError } from './dsh.js';
 import { isTaskMessage } from './classify.js';
 import { polish } from './decor.js';
 import { buildPrompt, notesFrom } from './prompt.js';
+import { parseActivityNote, parseMealNote } from './life.js';
 import { splitBubbles, splitReply } from './split.js';
-import { parseVoiceSegments } from './voice-out.js';
+import { parseVoiceSegments, VOICE_MARKER } from './voice-out.js';
+
+/** 他这句话是不是在点名要语音（「发条语音」「说句话给我听」「用声音回我」…）。 */
+export function wantsVoiceMessage(text) {
+  const raw = String(text ?? '');
+  if (!raw) return false;
+  return (
+    /(发|来|说|录|回|整)[一\s]{0,2}[条个句段]?[^，。！？\n]{0,6}(语音|声音)/.test(raw) ||
+    /语音(回|来|发|说|报)/.test(raw) ||
+    /用你?(自己)?的?(声音|嗓子|原声)/.test(raw) ||
+    /想听你(说|说话|出声|的声音)/.test(raw) ||
+    /(读|念|说)给我听/.test(raw) ||
+    /出声(给|让|跟)/.test(raw)
+  );
+}
 import { looksLikeThinking, stripThinking, looksLikeSelfTalk, stripSelfTalk } from './thinking-guard.js';
 import { looksUnfinished, isLowContent, pickNudge } from './reader.js';
 
@@ -25,13 +40,16 @@ import { looksUnfinished, isLowContent, pickNudge } from './reader.js';
  *   onActivity?: (state: string) => void,
  *   life?: {promptSection: () => Promise<string>},
  *   mind?: {promptSection: () => Promise<string>},
+ *   recollection?: {promptSection: (text: string) => Promise<string>},
+ *   meals?: {append: (dish: string) => Promise<any>},
+ *   health?: {record: (update: {component: string, ok: boolean, error?: string}) => Promise<any>},
  *   sticker?: {pick: () => Promise<string|null>},
  *   sendSticker?: (msg: any, file: string) => Promise<void>,
  * }} deps
  */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function createBridge({ config, runner, chatRunner, memory, queue, log, reply, typing, persona, voice, slang, vision, onActivity, life, mind, sticker, sendSticker, voiceOut, sendVoice }) {
+export function createBridge({ config, runner, chatRunner, memory, queue, log, reply, typing, persona, voice, slang, vision, onActivity, life, mind, recollection, meals, health, sticker, sendSticker, voiceOut, sendVoice, agenda, nudgeMind, robotInbox, notifyRobotTask }) {
   /**
    * 上一轮是不是卡超时了。
    * 她看不到系统这一层：10-29 19:45 那轮 DSH 超时，系统自动发了句「这个卡住了」，
@@ -180,7 +198,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     skipState.day = day;
     skipState.count = used + 1;
     skipState.lastAt = Date.now();
-    await memory.append(key, 'user', text).catch(() => {});
+    await memory.append(key, 'user', text, { name: msg.senderName }).catch(() => {});
     log.info(`这条不接了（今天第 ${skipState.count}/${budget} 次）：${text.slice(0, 20)}`);
     onActivity?.('skipped');
     return true;
@@ -193,12 +211,16 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     if (nudges.length > 6) nudges.shift();
     await safeReply(msg, line);
     const key = memoryKey(msg);
-    await memory.append(key, 'user', text).catch(() => {});
+    await memory.append(key, 'user', text, { name: msg.senderName }).catch(() => {});
     await memory.append(key, 'assistant', line).catch(() => {});
     log.info(`他没说完，先问一句：${line}`);
   }
 
   async function processMessage(msg, key, text) {
+    // 正在聊天就先把她的「此刻」改成聊天中：不然房间那边还挂着她十分钟前的状态
+    if (!msg.groupId && life?.noteActivity) {
+      void life.noteActivity('在手机上跟你聊天', 20).catch((error) => log.debug?.(`记此刻状态失败：${error?.message ?? error}`));
+    }
     const stats = queue.stats();
     const queuedAhead = stats.waiting > 0 || stats.active > 0;
 
@@ -208,6 +230,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     } catch (error) {
       const detail = error?.stderr ? `\n${error.stderr}` : '';
       log.error(`处理失败 ${key}: ${error?.message ?? error}${detail}`);
+      void health?.record({ component: 'chat', ok: false, error: String(error?.message ?? error) });
       onActivity?.('error');
       const message =
         error instanceof DshError && error.timedOut
@@ -292,6 +315,10 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     const lifeText = life ? await life.promptSection().catch(() => '') : '';
     // 她自己时间里想的事：接进这一轮，让她接着自己刚才想的往下说，而不是从零开机
     const mindText = mind ? await mind.promptSection().catch(() => '') : '';
+    // 「你记得的事」：按他这句话去记忆里捞。注解在 memory-store.js，别把整本记忆塞进来
+    const memoryText = recollection && text ? await recollection.promptSection(text).catch(() => '') : '';
+    // 她手上还没做完的事
+    const agendaText = agenda?.promptSection ? await agenda.promptSection().catch(() => '') : '';
 
     // 他隔了多久才收到回复：不写清楚，她就会自己编（「才二十分钟不到」其实三十多分钟）
     const lastUserAt = [...dialogue].reverse().find((entry) => entry.role === 'user')?.at ?? 0;
@@ -322,6 +349,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       );
     }
     if (mindText) extraLines.push(mindText);
+    if (memoryText) extraLines.push(memoryText);
 
     const prompt = buildPrompt({
       persona: personaText,
@@ -329,7 +357,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       slang: slangText,
       history: dialogue,
       notes,
-      extra: extraLines.join('\n\n'),
+      extra: [agendaText, extraLines.join('\n\n')].filter(Boolean).join('\n\n'),
       text,
       senderName: msg.senderName || '用户',
       roomName: msg.roomName,
@@ -384,12 +412,25 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
         .filter((entry) => entry.role === 'assistant')
         .map((entry) => entry.text)
         .slice(-2);
-      const output = polish(answer, { recent, maxEmoji: config.emojiMax ?? 2 });
+      const polished = polish(answer, { recent, maxEmoji: config.emojiMax ?? 2 });
+      // 她自己写了「此刻我在干嘛」就顺手改生活状态（那行不会发出去，只落进房间和下一轮）
+      const noted = parseActivityNote(polished);
+      const ate = parseMealNote(noted.text || polished);
+      const output = ate.text || polished;
+      if (noted.activity && life?.noteActivity) {
+        void life.noteActivity(noted.activity, 90).catch((error) => log.debug?.(`记此刻状态失败：${error?.message ?? error}`));
+      }
+      if (ate.meal && meals?.append) {
+        void meals.append(ate.meal).catch((error) => log.debug?.(`记饭账失败：${error?.message ?? error}`));
+      }
       const userTurn = msg.type === 'media' ? `[${msg.kind === 'image' ? '图片' : msg.kind}]${text ? ` ${text}` : ''}` : text;
       failedTurns.delete(key);
-      await memory.append(key, 'user', userTurn);
+      await memory.append(key, 'user', userTurn, { name: msg.senderName });
       await memory.append(key, 'assistant', output);
+      // 聊完让她那边早点接上：她的循环看到这个会提前想一轮
+      void nudgeMind?.('chat');
       log.info(`完成 ${key} ${Math.round(durationMs / 1000)}s ${output.length}chars${output === raw.trim() ? '' : '（已去重）'}`);
+      void health?.record({ component: 'chat', ok: true });
       onActivity?.('done');
       return { output, turnMs: durationMs };
     } catch (error) {
@@ -439,6 +480,45 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
   }
 
   async function deliver(msg, answer, meta = {}) {
+    // 她自己在聊天里记下的东西：不发给爸爸，写进记忆
+    const notes = [...String(answer ?? '').matchAll(/【记住[:：]([^】\n]{1,120})】/g)]
+      .map((match) => match[1].trim())
+      .filter(Boolean);
+    if (notes.length > 0) {
+      answer = String(answer)
+        .replace(/【记住[:：][^】\n]{1,120}】/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      for (const note of notes) {
+        Promise.resolve(recollection?.addNote?.({ text: note, source: 'chat' }))
+          .then(() => log.info?.(`她自己记下：${note}`))
+          .catch((error) => log.debug?.(`记笔记失败：${error?.message ?? error}`));
+      }
+    }
+    // 她找机器人：技术问题，写清楚卡在哪。不发给爸爸。
+    const robotNotes = [...String(answer ?? '').matchAll(/【找机器人[:：]([^】\n]{1,160})】/g)].map((m) => m[1].trim()).filter(Boolean);
+    if (robotNotes.length > 0) {
+      answer = String(answer)
+        .replace(/【找机器人[:：][^】\n]{1,160}】/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      for (const note of robotNotes) {
+        void robotInbox?.add?.({ text: note, source: 'chat' });
+        void notifyRobotTask?.(note);
+      }
+    }
+    // 她可以在回复里顺手记/划掉「手上的事」
+    const todoNotes = [...String(answer ?? '').matchAll(/【待办[:：]([^】\n]{1,80})】/g)].map((m) => m[1].trim()).filter(Boolean);
+    const doneNotes = [...String(answer ?? '').matchAll(/【做完[:：]([^】\n]{1,80})】/g)].map((m) => m[1].trim()).filter(Boolean);
+    if (todoNotes.length > 0 || doneNotes.length > 0) {
+      answer = String(answer)
+        .replace(/【待办[:：][^】\n]{1,80}】/g, '')
+        .replace(/【做完[:：][^】\n]{1,80}】/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      for (const note of todoNotes) void agenda?.add?.({ text: note, source: 'chat' });
+      for (const note of doneNotes) void agenda?.closeByText?.(note);
+    }
     const limit = Math.max(200, config.maxReplyChars);
     const maxTotal = limit * 6;
     const text =
@@ -448,6 +528,8 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
 
     // 她可以在回复里用【语音】标记「这句我想说出口」，拆成语音段和文字段
     const segments = parseVoiceSegments(text);
+    // 他明确点名要语音时，不再拿「离上一条不到 X 分钟」拦她
+    const forceVoice = wantsVoiceMessage(msg?.text);
 
     const thinkMin = Math.max(0, config.chatThinkMinMs ?? 400);
     const thinkMax = Math.max(thinkMin, config.chatThinkMaxMs ?? 1_200);
@@ -476,10 +558,13 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       if (segment.kind === 'voice') {
         const allow = voiceUsed === 0;
         if (allow) voiceUsed += 1;
-        await speakSegment(msg, segment.text, allow);
+        await speakSegment(msg, segment.text, allow, forceVoice);
         continue;
       }
-      const bubbles = splitBubbles(segment.text, {
+      // 模型偶尔把【语音】塞在句子中间：parser 不拆，这里也必须把它清掉，不能漏到 QQ 上
+      const cleanSegment = segment.text.split(VOICE_MARKER).join('').trim();
+      if (!cleanSegment) continue;
+      const bubbles = splitBubbles(cleanSegment, {
         maxLen: config.bubbleMaxChars ?? 90,
         maxBubbles: config.bubbleMax ?? 3,
       });
@@ -509,20 +594,23 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
    * 发一条语音。任何一步不行（没开 / 今天说太多了 / 合成失败 / 在群里）都安静降级成文字，
    * 绝不因为一句「想跟你说句话」把整轮回复卡住。
    */
-  async function speakSegment(msg, text, allow = true) {
+  async function speakSegment(msg, text, allow = true, force = false) {
     const line = String(text ?? '').trim();
     if (!line) return;
     if (!allow || msg.groupId || !voiceOut || !sendVoice) {
       return safeReply(msg, line);
     }
     const verdict =
-      typeof voiceOut.canSpeak === 'function' ? voiceOut.canSpeak() : { ok: false, reason: '不可用' };
+      typeof voiceOut.canSpeak === 'function'
+        ? voiceOut.canSpeak(Date.now(), { force })
+        : { ok: false, reason: '不可用' };
     if (!verdict.ok) {
       log.info(`不发语音（${verdict.reason}），改发文字`);
       return safeReply(msg, line);
     }
+    if (force) log.info('他点名要语音，这条不按间隔拦');
     try {
-      const result = await voiceOut.speak(line);
+      const result = await voiceOut.speak(line, { force });
       await sendVoice(msg, result.silk, { text: line, durationMs: result.durationMs });
     } catch (error) {
       log.warn(`语音合成失败，改发文字：${error?.message ?? error}`);
