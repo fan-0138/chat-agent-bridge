@@ -43,7 +43,10 @@ test('一句话：普通日子和纪念日说法不一样', () => {
   const first = at('2026-10-24T12:27:52Z');
   const normal = togetherLine({ firstAt: first, days: 11, now: at('2026-11-03T12:00:00Z') });
   assert.match(normal, /第 11 天/);
-  assert.match(normal, /10\/24 20:27/);
+  // 第一条消息按本地时区显示：CI 跑在 UTC，别硬编码上海时间
+  const d = new Date(first);
+  const pad = (n) => String(n).padStart(2, '0');
+  assert.match(normal, new RegExp(`${pad(d.getMonth() + 1)}\\/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`));
   assert.doesNotMatch(normal, /——/);
   const milestone = togetherLine({ firstAt: first, days: 365, now: at('2027-10-24T12:00:00Z') });
   assert.match(milestone, /第 365 天/);
