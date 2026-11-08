@@ -16,7 +16,10 @@ export const BUNDLED_CLI_CANDIDATES = [
   '/Applications/DSH Desktop.app/Contents/Resources/runtime/cli/bin/dsh',
 ];
 
-const API_KEY_NAMES = ['DEEPSEEK_API_KEY'];
+// 2026-11-07 换 API 两次：先 MaaS 403 → 切 niucodes → 夜里 niucodes 不稳（502）又切回 MaaS。
+// 现在主力是 MaaS（provider `deepseek-official`，认 DEEPSEEK_API_KEY），niucodes 当备胎。
+// 这里按顺序找，谁有值就把谁塞进子进程环境（provider 自己认自己的 apiKeyEnv）。
+const API_KEY_NAMES = ['DEEPSEEK_API_KEY', 'NIUCODES_API_KEY'];
 
 /** 优先用显式配置，其次找桌面版自带 CLI，最后退回 PATH 上的 dsh。 */
 export function resolveDshCommand(env = process.env) {
@@ -35,6 +38,36 @@ export function resolveDshCommand(env = process.env) {
  *   旧版： refs:\n  DEEPSEEK_API_KEY: sk-xxx
  * 返回值只用于子进程环境变量，不写日志、不落盘。
  */
+/** 把能找到的 key 全取出来（名字 → 值）。dsh 子进程需要哪把由它自己挑。 */
+export async function resolveApiKeys({ env = process.env, home = homedir() } = {}) {
+  const found = {};
+  for (const name of API_KEY_NAMES) {
+    const value = env[name]?.trim();
+    if (value) found[name] = value;
+  }
+
+  const file = join(home, '.dsh', '.credentials.yaml');
+  let text = '';
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    return found;
+  }
+  for (const name of API_KEY_NAMES) {
+    if (found[name]) continue;
+    const match = text.match(new RegExp(`^\\s*${name}:\\s*(.+?)\\s*$`, 'm'));
+    if (!match) continue;
+    const value = match[1].replace(/^['"]|['"]$/g, '').trim();
+    if (value) found[name] = value;
+  }
+  return found;
+}
+
+/** 每次 spawn 现取全部 key（换完 key 不用重启）。 */
+export function createApiKeysSource({ env = process.env, home = homedir() } = {}) {
+  return async () => resolveApiKeys({ env, home });
+}
+
 export async function resolveApiKey({ env = process.env, home = homedir() } = {}) {
   for (const name of API_KEY_NAMES) {
     const value = env[name]?.trim();

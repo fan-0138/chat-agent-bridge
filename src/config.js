@@ -26,6 +26,7 @@ const DEFAULTS = {
   personaFile: 'persona.md',
   visionTimeoutMs: 60_000,
   maxMediaBytes: 25 * 1024 * 1024,
+  maxVideoBytes: 80 * 1024 * 1024,   // QQ 视频看一下用，别把盘塞满
   longPollTimeoutMs: 60_000,
   qrTimeoutMs: 480_000,
 };
@@ -98,6 +99,7 @@ export function loadConfig(env = process.env) {
     visionCli: env.VISION_CLI?.trim() || null,
     visionTimeoutMs: readInt(env, 'VISION_TIMEOUT_MS', DEFAULTS.visionTimeoutMs),
     maxMediaBytes: readInt(env, 'MAX_MEDIA_BYTES', DEFAULTS.maxMediaBytes),
+    maxVideoBytes: readInt(env, 'MAX_VIDEO_BYTES', DEFAULTS.maxVideoBytes),
     longPollTimeoutMs: readInt(env, 'LONG_POLL_TIMEOUT_MS', DEFAULTS.longPollTimeoutMs),
     qrTimeoutMs: readInt(env, 'QR_TIMEOUT_MS', DEFAULTS.qrTimeoutMs),
     problems,

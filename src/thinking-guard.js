@@ -15,6 +15,18 @@
 
 /** 只在「挑回复」的思考里才出现的说法 */
 const META_MARKERS = [
+  // 2026-11-07 实测：MaaS 那条线路会把英文推理直接打进来，形如
+  // 「Answer in Chinese, one sentence. Maybe add nothing else. ... Final: "今天两条都发…"」
+  'Final:',
+  'Final：',
+  'Let me',
+  "I'll",
+  "I will",
+  'Answer in',
+  'one sentence',
+  "That's ",
+  'Maybe add',
+  'Should I',
   '要接',
   '刻度',
   '收住',
@@ -69,6 +81,13 @@ export function stripThinking(text) {
   // 不像思考就别动它，原样返回（防止把正常回复的「行吧」削掉）
   if (!looksLikeThinking(s)) return s;
 
+  // 有的线路会先吐一段推理再给 Final: 收尾——那就直接取 Final 后面的内容
+  const finalMark = s.match(/(?:^|\n)\s*(?:Final|最终|答案)\s*[:：]\s*(.+)$/s);
+  if (finalMark) {
+    const picked = finalMark[1].replace(/^[「『"]|[」』"]$/gu, '').trim();
+    if (picked && picked.length <= 200) return picked;
+  }
+
   // 模型挑完候选，最后一句通常是它选中的那句，前面常挂着「不错，收住。」这类话术
   const lastLine = s.split('\n').filter((line) => line.trim()).pop() ?? '';
   const candidate = lastLine
@@ -82,6 +101,12 @@ export function stripThinking(text) {
   if ((candidate.match(QUOTE_DENSE) ?? []).length >= 2) return '';
   return candidate;
 }
+
+/** 把一段话切成句子，**句尾标点和换行保留**（trim 会把换行吃掉，句子就粘成一坨）。 */
+function sentencesOf(text) {
+  return String(text ?? '').match(/[^。！？!?…\n]+[。！？!?…\n]*/g) ?? [];
+}
+
 /* ───────────────── 第二种漏：把「我怎么看他这句话」的独白发出来 ───────────────── */
 
 /**
@@ -127,9 +152,79 @@ export function looksLikeSelfTalk(text, said = '') {
 export function stripSelfTalk(text) {
   const s = String(text ?? '').trim();
   if (!s) return '';
-  const kept = s
-    .split(/(?<=[。！？!?…\n])/u)
-    .map((part) => part.trim())
-    .filter((part) => part && !SELFTALK_MARKERS.some((marker) => part.includes(marker)));
-  return kept.join('').trim();
+  return sentencesOf(s)
+    .filter((part) => part.trim() && !SELFTALK_MARKERS.some((marker) => part.includes(marker)))
+    .join('')
+    .trim();
+}
+
+/* ───────────────── 第三种漏：把「要不要写标记」的纠结发出来 ───────────────── */
+
+/**
+ * 2026-11-07 实录（换模型之后）：她回的是——
+ *   「米店抱大米那条，刚剪好的 / 玻璃柜那条留明天……八点我准时传 /
+ *     实际没吃，别写。删掉。改成不加标记或者只写此刻？没换状态。就不加。八点我准时传」
+ *
+ * 这就是模型在正文里纠结「该不该加【吃了】【此刻】这些标记」，还把自己改稿的过程念了出来。
+ * 判据：出现两个以上「处理标记/改稿」的词才算，别把正常说话的「删掉这条」误杀。
+ */
+const NOTE_META_MARKERS = [
+  '加标记',
+  '不加标记',
+  '没加标记',
+  '标记',
+  '换状态',
+  '没换状态',
+  '别写',
+  '删掉',
+  '改成',
+  '就不加',
+  '要不要写',
+  '实际没吃',
+  '写错了',
+];
+
+/** 这段像不像在跟自己的输出格式较劲？ */
+export function looksLikeNoteTalk(text) {
+  const s = String(text ?? '').trim();
+  if (!s) return false;
+  const hits = NOTE_META_MARKERS.reduce((n, marker) => (s.includes(marker) ? n + 1 : n), 0);
+  return hits >= 2;
+}
+
+/** 把纠结标记的句子去掉；一句话都不剩就返回空（交给上层重问）。 */
+export function stripNoteTalk(text) {
+  const s = String(text ?? '').trim();
+  if (!s) return '';
+  return sentencesOf(s)
+    .filter((part) => part.trim() && !NOTE_META_MARKERS.some((marker) => part.includes(marker)))
+    .join('')
+    .trim();
+}
+
+/* ───────────────── 通用兜底：改稿留下的重复尾巴 ───────────────── */
+
+/**
+ * 模型自己改稿时，常把同一句念两遍，中间夹着没删干净的分析。
+ * 找到「重复出现的那句」，在它第一次出现的地方截断。
+ *   「A / B / A / 分析 / A」→「A / B / A」
+ */
+export function trimRepeatedTail(text) {
+  const s = String(text ?? '').trim();
+  if (!s) return s;
+  const parts = sentencesOf(s).filter((part) => part.trim());
+  if (parts.length < 3) return s;
+  const seen = new Map();
+  for (let i = 0; i < parts.length; i += 1) {
+    const key = parts[i].replace(/[\s。！？!?…，,]/gu, '');
+    if (key.length < 5) continue;
+    if (!seen.has(key)) {
+      seen.set(key, i);
+      continue;
+    }
+    // 第二次出现 → 截到第一次出现的结尾
+    const cut = seen.get(key);
+    return parts.slice(0, cut + 1).join('');
+  }
+  return s;
 }

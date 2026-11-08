@@ -100,6 +100,64 @@ test('当前活动：记录没过期就用记录，过期就回落', () => {
   assert.notEqual(expired.label, '在刷抖音');
 });
 
+test('「在回消息」只是临时一层：过期回到她本来在干的事', () => {
+  const now = atHour(15);
+  const base = now - 10 * 60_000;
+  // 她本来在刷抖音（60 分钟），中间压了一层「在手机上回你消息」（5 分钟）
+  const state = {
+    activity: '在手机上回你消息',
+    activitySince: now - 60_000,
+    activityTtlMin: 5,
+    activityOverlay: true,
+    activityBase: { label: '在刷抖音', since: base, ttl: 60 },
+  };
+  assert.equal(currentActivity(state, now).label, '在手机上回你消息');
+  // 临时层过了（+10 分钟），回到刷抖音，计时按刷抖音自己那会儿算
+  const back = currentActivity(state, now + 10 * 60_000);
+  assert.equal(back.label, '在刷抖音');
+  assert.equal(back.fromRecord, true);
+  assert.ok(back.ageMin >= 10);
+  // 本来那件也过期了，就退回时段默认
+  assert.equal(currentActivity(state, now + 90 * 60_000).fromRecord, false);
+});
+
+test('overlayActivity：压一层、过期自动退、真换事做就当没压过', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createLife } = await import('../src/life.js');
+  const root = await mkdtemp(join(tmpdir(), 'life-overlay-'));
+  try {
+    let clock = atHour(15);
+    const life = createLife({ config, root, log: { debug() {}, info() {}, warn() {} }, now: () => clock });
+    await life.load();
+    await life.noteActivity('在刷抖音', 60);
+
+    clock += 2 * 60_000;
+    const overlay = await life.overlayActivity('在手机上回你消息', 5);
+    assert.equal(overlay.label, '在手机上回你消息');
+    // 同一条消息再来一句也不能把她本来做的事覆盖掉
+    clock += 60_000;
+    await life.overlayActivity('在手机上回你消息', 5);
+    assert.equal((await life.peek()).state.activityBase?.label, '在刷抖音');
+
+    // 临时层过期 → 回到刷抖音
+    clock += 6 * 60_000;
+    const after = (await life.peek()).activity;
+    assert.equal(after.label, '在刷抖音');
+    assert.equal(after.fromRecord, true);
+
+    // 真的换了件事做：临时层作废
+    await life.overlayActivity('在手机上回你消息', 5);
+    await life.noteActivity('躺在床上，手机扣在枕头边', 90);
+    assert.equal((await life.peek()).activity.label, '躺在床上，手机扣在枕头边');
+    clock += 10 * 60_000;
+    assert.equal((await life.peek()).activity.label, '躺在床上，手机扣在枕头边');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('生活状态段落包含时间、活动、心情', () => {
   const now = atHour(15);
   const text = describeLife({ activity: '在刷抖音', activitySince: now - 20 * 60_000, activityTtlMin: 60 }, now);

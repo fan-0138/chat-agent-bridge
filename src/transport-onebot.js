@@ -21,6 +21,7 @@ import WebSocket from 'ws';
 const MAX_IMAGE_BASE64 = 6 * 1024 * 1024; // base64 长度上限（约 4.5MB 原图）
 const ACTION_TIMEOUT_MS = 15_000;
 const IMAGE_TIMEOUT_MS = 20_000;
+const VIDEO_TIMEOUT_MS = 90_000;   // QQ 视频原片十几兆，20 秒拉不完
 
 /* ────────────────────────── 纯函数：可单测 ────────────────────────── */
 
@@ -141,17 +142,31 @@ export function extractText(message, selfId) {
   return { text, atSelf, atAll };
 }
 
-/** 找到第一条图片，返回可下载的地址（NapCat 通常给 http 链接）。 */
-export function findImage(message) {
+/**
+ * 找到第一条图片/视频，返回可下载的地址（NapCat 通常给 http 链接）。
+ * 图片优先：一条消息里同时有图和视频时，图更容易看。
+ * @returns {{kind:'image'|'video', url:string|null, file:string|null}|null}
+ */
+export function findMedia(message) {
   if (!Array.isArray(message)) return null;
+  let video = null;
   for (const segment of message) {
-    if (segment?.type !== 'image') continue;
+    const type = segment?.type;
+    if (type !== 'image' && type !== 'video') continue;
     const data = segment.data ?? {};
     const url = typeof data.url === 'string' && data.url ? data.url : null;
     const file = typeof data.file === 'string' && data.file ? data.file : null;
-    if (url || file) return { url, file };
+    if (!url && !file) continue;
+    if (type === 'image') return { kind: 'image', url, file };
+    if (!video) video = { kind: 'video', url, file };
   }
-  return null;
+  return video;
+}
+
+/** 只要图片（老接口，保留给测试和外部调用）。 */
+export function findImage(message) {
+  const media = findMedia(message);
+  return media && media.kind === 'image' ? { url: media.url, file: media.file } : null;
 }
 
 /**
@@ -179,17 +194,18 @@ export function normalizeEvent(
     // 群临时会话（sub_type=group）是陌生人通道，直接忽略。
     if (event.sub_type === 'group') return null;
     const { text } = extractText(event.message, self);
-    const image = findImage(event.message);
-    if (!text && !image) return null;
+    const media = findMedia(event.message);
+    if (!text && !media) return null;
     return {
-      type: image ? 'media' : 'text',
+      type: media ? 'media' : 'text',
+      kind: media?.kind,
       id,
       text,
       senderId: userId,
       senderName,
       isSelf: false,
       conversationId: `private_${userId}`,
-      image,
+      media,
       receivedAt: event.time ? event.time * 1000 : Date.now(),
     };
   }
@@ -209,11 +225,12 @@ export function normalizeEvent(
     if (!atSelf && !hasPrefix && !setupMode) return null;
 
     const text = hasPrefix ? flat.slice(prefix.length).trim() : flat;
-    const image = findImage(event.message);
-    if (!text && !image) return null;
+    const media = findMedia(event.message);
+    if (!text && !media) return null;
 
     return {
-      type: image ? 'media' : 'text',
+      type: media ? 'media' : 'text',
+      kind: media?.kind,
       id,
       text,
       senderId: userId,
@@ -222,7 +239,7 @@ export function normalizeEvent(
       groupId,
       roomName: groupNames?.get(groupId) ?? null,
       conversationId: `group_${groupId}`,
-      image,
+      media,
       receivedAt: event.time ? event.time * 1000 : Date.now(),
     };
   }
@@ -359,46 +376,50 @@ export async function startOneBot({ config, log, onMessage }) {
   }
 
   async function downloadImage(msg) {
-    const image = msg.image;
-    if (!image) return null;
+    const media = msg.media;
+    if (!media) return null;
+    const isVideo = media.kind === 'video';
+    const kindLabel = isVideo ? '视频' : '图片';
     const dir = join(config.dataDir, 'inbox');
     const stamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-    const tail = (msg.id || 'img').replace(/[^A-Za-z0-9]/g, '').slice(-8) || 'img';
+    const tail = (msg.id || 'media').replace(/[^A-Za-z0-9]/g, '').slice(-8) || 'media';
+    // 视频比图片大得多：QQ 发过来的原片十几兆很常见
+    const maxBytes = (isVideo ? config.maxVideoBytes : config.maxMediaBytes) ?? config.maxMediaBytes;
 
     try {
       let data = null;
       let ext = null;
 
-      if (image.file && isAbsolute(image.file)) {
+      if (media.file && isAbsolute(media.file)) {
         // NapCat 开了本地文件直链时会直接给绝对路径。
-        const info = await stat(image.file).catch(() => null);
-        if (info && info.size > 0 && info.size <= config.maxMediaBytes) {
-          data = await readFile(image.file);
-          ext = extname(image.file).replace('.', '') || 'jpg';
+        const info = await stat(media.file).catch(() => null);
+        if (info && info.size > 0 && info.size <= maxBytes) {
+          data = await readFile(media.file);
+          ext = extname(media.file).replace('.', '') || (isVideo ? 'mp4' : 'jpg');
         }
       }
 
-      if (!data && image.url && /^https?:\/\//i.test(image.url)) {
-        const response = await fetch(image.url, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
+      if (!data && media.url && /^https?:\/\//i.test(media.url)) {
+        const response = await fetch(media.url, { signal: AbortSignal.timeout(isVideo ? VIDEO_TIMEOUT_MS : IMAGE_TIMEOUT_MS) });
         if (response.ok) {
           const buffer = Buffer.from(await response.arrayBuffer());
-          if (buffer.length > 0 && buffer.length <= config.maxMediaBytes) data = buffer;
-          ext = sniffExt(buffer) ?? 'jpg';
+          if (buffer.length > 0 && buffer.length <= maxBytes) data = buffer;
+          ext = isVideo ? (sniffExt(buffer) ?? 'mp4') : (sniffExt(buffer) ?? 'jpg');
         }
       }
 
       if (!data) {
-        log.warn('图片下载失败，按纯文本处理');
+        log.warn(`${kindLabel}下载失败（超过 ${Math.round(maxBytes / 1024 / 1024)}MB 或取不到地址），按纯文本处理`);
         return null;
       }
 
       await mkdir(dir, { recursive: true });
       const path = join(dir, `${stamp}-${tail}.${ext}`);
       await writeFile(path, data);
-      log.info(`收到 QQ 图片：${path}（${Math.round(data.length / 1024)}KB）`);
-      return { kind: 'image', path, fileName: null };
+      log.info(`收到 QQ ${kindLabel}：${path}（${Math.round(data.length / 1024)}KB）`);
+      return { kind: media.kind, path, fileName: null };
     } catch (error) {
-      log.warn(`图片处理失败：${error?.message ?? error}`);
+      log.warn(`${kindLabel}处理失败：${error?.message ?? error}`);
       return null;
     }
   }

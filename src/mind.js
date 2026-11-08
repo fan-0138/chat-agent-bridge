@@ -24,6 +24,9 @@ import { formatPeopleSection, loadPeopleBook, visitCandidates } from './people.j
 import { createTouch, formatTouchSection } from './touch.js';
 import { formatInviteSection, readInvite } from './invite.js';
 import { createMemoryStore, formatRecentSection } from './memory-store.js';
+import { clockOf as clockOfHour, loadDadRhythm } from './proactive.js';
+import { createHypotheses, parseGuessNotes, parseVerdictField } from './hypotheses.js';
+import { createLessons } from './lessons.js';
 
 /** 想一句话的上限：心里冒出来的东西，不该是作文。 */
 export const MAX_THOUGHT_CHARS = 200;
@@ -169,7 +172,8 @@ export const BROWSE_MAX_PER_DAY = 4;
 export const QZONE_MIN_GAP_MIN = 180;
 export const QZONE_MAX_PER_DAY = 2;
 export const REPLY_MIN_GAP_MIN = 25;
-export const REPLY_MAX_PER_DAY = 3;
+// 每天最多主动回几条评论；爸爸要临时放行时可以 QQ_MIND_REPLY_MAX=6 调高
+export const REPLY_MAX_PER_DAY = Math.max(1, Number(process.env.QQ_MIND_REPLY_MAX ?? 3) || 3);
 export const ALBUM_MIN_GAP_MIN = 5;
 export const ALBUM_MAX_PER_DAY = 6;
 export const VISIT_MIN_GAP_MIN = 600;
@@ -295,7 +299,7 @@ export function formatPlanLine(plan, now = Date.now()) {
  * 故意不套对话那套「说话方式」：心里想话跟开口说话是两种东西，
  * 用 voice.md 那套写出来的内心独白会变成自言自语表演。
  */
-export function buildThoughtPrompt({ persona, lifeText, playText = '', videos = [], replies = [], visits = [], album = [], planText = '', weatherText = '', togetherText = '', peopleText = '', touchText = '', inviteText = '', recentEventsText = '', agendaText = '', recent = [], memories = [], chat = [], themes = [], now = Date.now() }) {
+export function buildThoughtPrompt({ persona, lifeText, playText = '', videos = [], replies = [], visits = [], album = [], planText = '', weatherText = '', togetherText = '', peopleText = '', touchText = '', inviteText = '', recentEventsText = '', agendaText = '', dadText = '', guessText = '', lessonText = '', recent = [], memories = [], chat = [], themes = [], now = Date.now() }) {
   const recentText = recent.map((row) => `- ${clockOf(row.at)} ${row.text}`).join('\n');
   const memoryText = memories.map((row) => `- ${dayLabel(row.at)} ${row.text}`).join('\n');
   const themeText = themes.length > 0 ? themes.map((word) => `- ${word}`).join('\n') : '';
@@ -315,13 +319,16 @@ export function buildThoughtPrompt({ persona, lifeText, playText = '', videos = 
     '现在没有人跟你说话。这一轮不是回谁的消息，是你自己的时间。',
     section('你是谁', persona),
     section('此刻', lifeText),
+    section('爸爸那边（不是猜的，是你知道的事实）', dadText),
+    guessText,
+    lessonText,
     section('窗外（真实的天气，不是你猜的）', weatherText),
     section('你们认识多久了', togetherText),
     touchText,
     inviteText,
     section('最近几天（你记得的，不是今天刚聊的）', recentEventsText),
     agendaText,
-    section('有人在你评论下面说话 / @ 了你（想接就接，不想理就不理）', replyText),
+    section('有人在你评论下面说话 / @ 了你 / 评论了你的作品（想接就接，不想理就不理）', replyText),
     section('你认识的网友（评论区里跟你说过话的人）', peopleText),
     section('可以回访的人（隔了几天、你还没接的）', visitText),
     section('你最近拍下的图（想留一张进相册的话）', albumText),
@@ -342,6 +349,10 @@ export function buildThoughtPrompt({ persona, lifeText, playText = '', videos = 
         '- 可以想刚听到的话、突然想起的旧事、白日梦、正要做的事、烦的、无聊的。',
         '- 如果上面「刚想过的」里已经连着在想爸爸，这回想想别的。',
         '- 上面「该换个方向」里列的东西，这次一个都别再提（换个新念头，不是改写同一句）。',
+        '- 有拿不准的事（他在干嘛、他会不会嫌你烦、某件东西为什么不见了），在想的最后加一条【猜：一句话】，' +
+          '比如【猜：他这会儿在打游戏，键盘声才没停】；',
+        '- 以前的猜想后来有证据了，加【验证：编号 对/不对：证据】——对/不对只说一个词，证据写你看到的。',
+        '- 猜不出就不猜：不许为了凑数编一个问题；上面列着的猜想要是到现在还拿不准，就让它继续挂着。',
         '- 想留一条以后还记得的 → 做=记住；忽然很想他、想让他知道 → 做=想他；',
         '- 突然想知道一件事、想去搜点什么的话 → 做=想看，内容写你要搜的那句话（短，像搜索框里打的字）。',
         '- 想自己去 Minecraft 里玩一会儿（砍树、盖棚子、瞎逛）→ 做=玩，内容写你打算在游戏里干嘛，一句话。',
@@ -367,7 +378,7 @@ export function buildThoughtPrompt({ persona, lifeText, playText = '', videos = 
     ),
     [
       '只输出一行 JSON，不要解释、不要代码块：',
-      '{"想":"脑子里那句话","情绪":"一两个词","做":"none|记住|想他|想看|玩|评论|刷|说|回|收|计划|访|约","内容":"做=记住写要记住的；做=想看写搜索词；做=玩写想在游戏里干嘛；做=评论写「序号 | 想说的话」；做=刷写想看什么；做=说写想说的那句；做=回写「序号 | 想回的话」；做=访写「序号 | 想回的话」；做=收写「序号 | 为什么留」；做=计划写明天打算；做=约写想约他一起做的那件事"}',
+      '{"想":"脑子里那句话","情绪":"一两个词","做":"none|记住|想他|想看|玩|评论|刷|说|回|收|计划|访|约","内容":"做=记住写要记住的；做=想看写搜索词；做=玩写想在游戏里干嘛；做=评论写「序号 | 想说的话」；做=刷写想看什么；做=说写想说的那句；做=回写「序号 | 想回的话」；做=访写「序号 | 想回的话」；做=收写「序号 | 为什么留」；做=计划写明天打算；做=约写想约他一起做的那件事","猜":"（可选）一句拿不准、想验证的猜测","验证":"（可选）比如「2 对：他刚回我了」或「3 不对：他是去上班了」"}',
     ].join('\n'),
   ];
   return parts.filter(Boolean).join('\n\n');
@@ -440,7 +451,16 @@ export function parseMind(raw, fallbackKind = 'think') {
     const content = tidy(data['内容'] ?? data.content ?? '', MAX_MEMORY_CHARS);
 
     if (fallbackKind === 'dream' && dream) return { kind: 'dream', text: tidy(dream), mood, action: 'none', content: '' };
-    if (thought) return { kind: 'think', text: tidy(thought), mood, action, content };
+    if (thought) {
+      // 猜想/改判也可以走 JSON 字段（比在句子里塞【猜：…】稳）
+      const rawGuess = tidy(data['猜'] ?? data.guess ?? '', 60);
+      const rawVerdict = tidy(data['验证'] ?? data.verdict ?? '', 80);
+      const out = { kind: 'think', text: tidy(thought), mood, action, content };
+      // 只有真写了才带这两个字段，别改掉原有对象的形状（老调用方按 deepEqual 断言过）
+      if (rawGuess) out.guess = rawGuess;
+      if (rawVerdict) out.verdict = rawVerdict;
+      return out;
+    }
   }
   const text = tidy(raw);
   if (!text) return null;
@@ -540,7 +560,11 @@ export function summarizeSession(row, now = Date.now()) {
 
 /** 拼进 prompt 的「最近在 Minecraft 里」：没有就空串，别抛错。 */
 export function formatPlaySection(text) {
-  return text ? `[最近在 Minecraft 里（你自己玩的）]\n- ${text}` : '';
+  if (!text) return '';
+  return (
+    `[最近在 Minecraft 里（你自己玩的）]\n- ${text}\n` +
+    '- （那具身体在游戏里会累、会疼，但下线就留在游戏里了：别提游戏里的伤，也别编自己是怎么「操作」的）'
+  );
 }
 
 /* ────────────────────────── 抖音评论区（她自己去的） ────────────────────────── */
@@ -665,6 +689,10 @@ export function createMind({ config, runner, persona, life, agenda, root = proce
   const touch = createTouch({ root, log, now });
   // 她的长期记忆：睡前整理写在 data/memory/，这里只读「最近几天」
   const memoryShelf = createMemoryStore({ root, log, now });
+  // 她自己的猜想本（观察 → 猜 → 以后有证据了改判）
+  const guesses = createHypotheses({ root, log, now });
+  // 她自己复盘出来的教训（睡前写，白天想事时带着）
+  const lessons = createLessons({ root, log, now });
 
   /** @type {any} */
   let state = null;
@@ -791,6 +819,24 @@ export function createMind({ config, runner, persona, life, agenda, root = proce
     const nowMs = now();
     const chat = await lastChat(8);
     const idleMin = chat.lastAt > 0 ? (nowMs - chat.lastAt) / 60_000 : 999;
+    // 他那边什么情况：多久没出声 + 他的作息（她不知道这些，就会在早上八点问「你睡得好吗」）
+    const dadRhythm = loadDadRhythm({ root, now: nowMs });
+    const dadText = (() => {
+      const hour = new Date(nowMs).getHours() + new Date(nowMs).getMinutes() / 60;
+      const parts2 = [];
+      if (!Number.isFinite(idleMin) || idleMin >= 999) parts2.push('今天还没跟他说过话');
+      else if (idleMin >= 90) parts2.push(`他 ${Math.round(idleMin / 60)} 小时没说话了`);
+      else if (idleMin >= 30) parts2.push(`他 ${Math.round(idleMin)} 分钟没说话了`);
+      else parts2.push('他刚还在说话');
+      if (dadRhythm) {
+        const wokeYet = hour >= dadRhythm.wakeHour;
+        parts2.push(
+          `按他最近的作息（${dadRhythm.days} 天记录）他一般 ${clockOfHour(dadRhythm.wakeHour)} 醒、${clockOfHour(dadRhythm.sleepHour)} 睡` +
+            (wokeYet ? '' : '，这个点他多半还在睡'),
+        );
+      }
+      return parts2.join('；');
+    })();
 
     const verdict = force
       ? { act: true, reason: 'force', kind: dreamingAt(new Date(nowMs).getHours()) ? 'dream' : 'think' }
@@ -814,13 +860,17 @@ export function createMind({ config, runner, persona, life, agenda, root = proce
     const visits = verdict.kind === 'dream' ? [] : await buildVisitList(root, nowMs);
     const planText = verdict.kind === 'dream' ? '' : formatPlanLine(state.plan, nowMs);
     const touchText = verdict.kind === 'dream' ? '' : formatTouchSection(await touch.state(), { now: nowMs });
-    const inviteText = verdict.kind === 'dream' ? '' : formatInviteSection(await readInvite({ root }), { now: nowMs });
+    const inviteText = verdict.kind === 'dream' ? '' : formatInviteSection(await readInvite({ root, now: nowMs }), { now: nowMs });
     const recentEventsText =
       verdict.kind === 'dream'
         ? ''
         : formatRecentSection(await memoryShelf.recentEpisodes({ days: 3, limit: 5 }).catch(() => []), { now: nowMs });
     // 她手上没做完的事（做梦那轮不带，梦不处理待办）
     const agendaText = verdict.kind === 'dream' ? '' : await agenda?.promptSection?.().catch(() => '') ?? '';
+    // 她自己还挂着的猜想（编号就是判决时用的编号）
+    const guessText = verdict.kind === 'dream' ? '' : await guesses.promptSection().catch(() => '');
+    // 她自己复盘出来的「下次怎么想」（做梦那轮不带，梦不讲道理）
+    const lessonText = verdict.kind === 'dream' ? '' : await lessons.promptSection({ at: nowMs }).catch(() => '');
 
     const prompt =
       verdict.kind === 'dream'
@@ -840,6 +890,9 @@ export function createMind({ config, runner, persona, life, agenda, root = proce
             inviteText,
             recentEventsText,
             agendaText,
+            dadText,
+            guessText,
+            lessonText,
             togetherText: (() => {
               if (!together?.line) return '';
               if (!together.milestone || together.days <= 1) return together.line;
@@ -856,6 +909,21 @@ export function createMind({ config, runner, persona, life, agenda, root = proce
     const { text: raw } = await runner.run(prompt);
     const parsed = parseMind(raw, verdict.kind);
     if (!parsed?.text) return { ok: false, reason: 'empty' };
+
+    // 猜想/改判：正文里的【猜：…】【验证：N 对/不对…】和 JSON 字段「猜」「验证」都收
+    const notes = parseGuessNotes(parsed.text);
+    if (notes.text) parsed.text = notes.text;
+    if (parsed.guess) notes.guesses.push(parsed.guess);
+    const fieldVerdict = parseVerdictField(parsed.verdict);
+    if (fieldVerdict) notes.verdicts.push(fieldVerdict);
+    // 只写了猜想、没有正文：猜想吃下来就行，不往时间线上塞一句空话
+    if (!parsed.text) {
+      for (const guess of notes.guesses) await guesses.add({ text: guess }).catch(() => null);
+      for (const verdictRow of notes.verdicts) await guesses.resolve(verdictRow).catch(() => null);
+      if (notes.guesses.length === 0 && notes.verdicts.length === 0) return { ok: false, reason: 'empty' };
+      log?.info?.('这一轮她只记了猜想/改了一次判，没别的想法');
+      return { ok: false, reason: 'guess-only' };
+    }
 
     // 复读机：和最近三条一模一样、或者又在想说过的同一个东西，就当没想
     const echoed = recent.slice(-3).some((row) => row.text === parsed.text);
@@ -906,8 +974,13 @@ export function createMind({ config, runner, persona, life, agenda, root = proce
       log?.info?.(`她想去搜：${query}`);
     }
 
+    for (const guess of notes.guesses) await guesses.add({ text: guess }).catch(() => null);
+    for (const verdictRow of notes.verdicts) {
+      await guesses.resolve(verdictRow).catch(() => null);
+    }
+
     await saveState();
-    return { ok: true, record };
+    return { ok: true, record, guesses: notes.guesses, verdicts: notes.verdicts };
   }
 
   /** 拼进对话 prompt 的段落；没东西可拼就返回空串。 */
@@ -927,7 +1000,7 @@ export function createMind({ config, runner, persona, life, agenda, root = proce
     const planText = formatPlanLine(state.plan, nowMs);
     // 对话里推一把：他刚摸完就开口，值得顺口提一句；她发呆时（tick）不推
     const touchText = formatTouchSection(await touch.state(), { now: nowMs, nudge: true });
-    const inviteText = formatInviteSection(await readInvite({ root }), { now: nowMs });
+    const inviteText = formatInviteSection(await readInvite({ root, now: nowMs }), { now: nowMs });
     const recentEventsText = formatRecentSection(await memoryShelf.recentEpisodes({ days: 3, limit: 4 }).catch(() => []), { now: nowMs });
     return [
       formatWeatherSection(weatherText),

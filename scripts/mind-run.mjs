@@ -5,6 +5,7 @@
  *   npm run mind                      # 常驻：每 10 分钟左右让她自己想一次
  *   npm run mind -- --once            # 立刻想一次（忽略预算，调试用）
  *   npm run mind -- --status          # 看她最近都想什么了
+ *   npm run mind -- --review          # 立刻跑一次睡前复盘（今天哪句想错了）
  *   npm run mind -- --interval 5      # 换成 5 分钟一次
  *   npm run mind -- --play-dry "去砍树" # 只打印要给游戏拼的参数，不起进程
  *   npm run mind -- --comment-dry "2|这句话"  # 只打印要去哪条视频下说什么
@@ -46,6 +47,7 @@ import { visitCandidates } from '../src/people.js';
 import { albumCandidates, saveToAlbum } from '../src/scrapbook.js';
 import { createInvite, decideInvite, readInvite } from '../src/invite.js';
 import { digest as digestMemory } from '../src/memory-digest.js';
+import { createLessons, reviewDue, reviewLessons } from '../src/lessons.js';
 import { createMemoryStore } from '../src/memory-store.js';
 import { createAgenda } from '../src/agenda.js';
 import { createUsage } from '../src/usage.js';
@@ -499,24 +501,30 @@ export async function maybeReply({ root, mind, log, record, dry = process.env.QQ
     const child = spawn(
       process.execPath,
       [
-        'scripts/douyin-comment-note.mjs',
+        // 在人家评论底下回复（楼中楼）：接口那条路回 ok 但不落地，只能走界面
+        'scripts/douyin-reply-ui.mjs',
         '--url', picked.videoUrl,
+        '--match', String(picked.content || '').slice(0, 12),
         '--text', composed.text.slice(0, 40),
-        '--reply-cid', String(picked.commentId),
-        '--root-cid', String(picked.rootCommentId || picked.commentId),
         '--nid', String(picked.nid),
         '--why', `回 ${picked.nickname}`,
       ],
       { cwd: root, detached: true, stdio: ['ignore', fd, fd], env: process.env },
     );
     child.on('error', (error) => log?.warn?.(`回评论起不来：${error?.message ?? error}`));
+    // 子进程是 detached 的，但 mind-run 活得比它久，exit 事件照样收得到。
+    // 不盯这一下的话，日志会先写「她回了…」，账本后来说没发出去，人就被骗了。
+    child.on('exit', (code) => {
+      if (code === 0) return;
+      log?.warn?.(`回 ${picked.nickname} 那句没落地（exit ${code}），原因在 data/mind/comments.jsonl 最后一行`);
+    });
     child.unref();
   } finally {
     closeSync(fd);
   }
-  // 「已回复」由 comment-note 在发成功之后自己记（失败要能重试）
+  // 「回过了」由 douyin-reply-ui 在**确认落地之后**自己写（失败要能重试），这里只管占额度
   await mind?.markSide?.('reply');
-  log?.info?.(`她回了 ${picked.nickname} 一句：「${composed.text.slice(0, 30)}」${composed.context ? '（看过视频）' : ''}`);
+  log?.info?.(`她去回 ${picked.nickname} 了：「${composed.text.slice(0, 30)}」${composed.context ? '（看过视频）' : ''}`);
   return { started: true, target: picked.nickname, text: composed.text, readVideo: Boolean(composed.context) };
 }
 
@@ -729,6 +737,30 @@ export async function maybeDigest({ root, runner, personaText, log, force = fals
 }
 
 /**
+ * 睡前复盘：让她自己回头看一眼「今天哪句想错了、下回怎么想」（lessons.js）。
+ * 一天只跑一次；和睡前整理同一个窗口，但各记各的账。
+ */
+export async function maybeReview({ root, runner, personaText, log, force = false, now = Date.now() }) {
+  const result = await reviewLessons({ root, now, runner, persona: personaText, log, force });
+  if (result.ok) {
+    if (result.lessons.length === 0) log?.info?.('睡前复盘完：今天没挑出想错的（也是她自己看的）');
+    else {
+      const lines = result.lessons.map((row) => {
+        const parts = [];
+        if (row.said) parts.push(`我说「${row.said}」`);
+        if (row.missed) parts.push(`漏了${row.missed}`);
+        if (row.next) parts.push(`以后${row.next}`);
+        return parts.join('；');
+      });
+      log?.info?.(`睡前复盘完（${lines.length} 条）\n  ${lines.join('\n  ')}`);
+    }
+  } else if (result.reason === 'model') {
+    log?.warn?.('睡前复盘今晚没成，下次再补');
+  }
+  return result;
+}
+
+/**
  * 到点了没有：只在 22:00 之后整理。
  * 故意不把凌晨算进来——零点后再整理一次，会把「今天」的额度用掉，
  * 当晚真正的睡前整理反而被 done 挡掉。
@@ -800,6 +832,17 @@ async function main() {
     if (peek.state.lastVisitAt) console.log(`上次回访网友：${fmtClock(peek.state.lastVisitAt)}`);
     if (peek.state.lastAlbumAt) console.log(`上次收图进相册：${fmtClock(peek.state.lastAlbumAt)}`);
     if (peek.state.plan?.text) console.log(`明天的打算：${peek.state.plan.text}`);
+    const lessonRows = await createLessons({ root, log }).recent({ limit: 3 }).catch(() => []);
+    if (lessonRows.length > 0) {
+      console.log(`她复盘出来的教训（最近 ${lessonRows.length} 条）：`);
+      for (const row of lessonRows) {
+        const parts = [];
+        if (row.said) parts.push(`我说「${row.said}」`);
+        if (row.missed) parts.push(`漏了${row.missed}`);
+        if (row.next) parts.push(`以后${row.next}`);
+        console.log(`  · ${row.day ?? ''} ${parts.join('；')}`);
+      }
+    }
     const healthNow = health.status();
     console.log(
       healthNow.ok
@@ -878,6 +921,23 @@ async function main() {
   }
   if (has('qzone-dry')) {
     await maybeQzone({ root, mind, log, record: { content: arg('qzone-dry') }, dry: true });
+    return;
+  }
+
+  if (has('review')) {
+    const result = await maybeReview({ root, runner, personaText, log, force: true });
+    if (!result.ok) {
+      console.log(`复盘没成：${result.reason}`);
+      process.exit(1);
+    }
+    console.log(result.lessons.length > 0 ? `这次复盘出 ${result.lessons.length} 条：` : '今天没挑出想错的。');
+    for (const row of result.lessons) {
+      const parts = [];
+      if (row.said) parts.push(`我说「${row.said}」`);
+      if (row.missed) parts.push(`漏了${row.missed}`);
+      if (row.next) parts.push(`以后${row.next}`);
+      console.log(`- ${parts.join('；')}`);
+    }
     return;
   }
 
@@ -985,6 +1045,17 @@ async function main() {
           else log.info('预算超了，今晚先不整理记忆');
         } catch (error) {
           log.warn(`睡前整理出错：${error?.message ?? error}`);
+        }
+      }
+
+      // 睡前复盘：今天哪句话她自己想错了（一天一次，22 点后）
+      if (reviewDue()) {
+        try {
+          const allowed = budgetNow?.level === 'over' ? false : (await budget.checkOptional()).allow;
+          if (allowed) await maybeReview({ root, runner, personaText, log });
+          else log.info('预算超了，今晚先不复盘');
+        } catch (error) {
+          log.warn(`睡前复盘出错：${error?.message ?? error}`);
         }
       }
 

@@ -11,6 +11,8 @@
  * 改文本容易把句子改坏，不值。
  */
 
+import { looksLikeThinking, stripThinking, looksLikeNoteTalk, stripNoteTalk, trimRepeatedTail } from './thinking-guard.js';
+
 const EMOJI = /\p{Extended_Pictographic}/gu;
 const OPENER_CHARS = '唔嗯诶欸哎唉哦噢哈啊呀嗷噫';
 const OPENER_RE = new RegExp(`^([${OPENER_CHARS}])[…，,、。.~～\\s]*`, 'u');
@@ -54,6 +56,18 @@ export function polish(text, options = {}) {
 
   let out = collapsePunctuation(original);
 
+  // 0. 最后一道网：思考过程 / 纠结标记 / 改稿重复 一律在出厂前清掉。
+  //    桥接那边 repairLeak 已经在做，但空间说说、抖音评论这些不走那条路，所以放在 polish 里兜全。
+  if (looksLikeThinking(out)) {
+    const cleaned = stripThinking(out);
+    if (cleaned) out = cleaned;
+  }
+  if (looksLikeNoteTalk(out)) {
+    const cleaned = stripNoteTalk(out);
+    if (cleaned) out = cleaned;
+  }
+  out = trimRepeatedTail(out);
+
   // 1. 开头填充音：最近两条里已经出现过同一个起头，就别再来一次
   const opener = openerOf(out);
   if (opener) {
@@ -87,4 +101,40 @@ export function polish(text, options = {}) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+
+/** 两句像不像（bigram 重合度 0~1）。用来判断她是不是又绕回同一件事。 */
+export function similarity(a, b) {
+  const grams = (text) => {
+    const clean = String(text ?? '').replace(/[\s，。！？、,.!?~～…「」『』"'（）()]/g, '');
+    const out = [];
+    for (let i = 0; i < clean.length - 1; i += 1) out.push(clean.slice(i, i + 2));
+    return out;
+  };
+  const ga = grams(a);
+  const gb = grams(b);
+  if (ga.length < 2 || gb.length < 2) return 0;
+  const setB = new Set(gb);
+  const hit = ga.filter((g) => setB.has(g)).length;
+  return hit / Math.min(ga.length, gb.length);
+}
+
+/**
+ * 这一条是不是「又绕回去了」：和她上一条很像，且她上一条已经在提要求/追问。
+ * 命中就值得让她自己回头看一眼（不是拿规则拦她）。
+ */
+export function looksLikeLooping(draft, previous = []) {
+  const text = String(draft ?? '').trim();
+  if (!text) return false;
+  const prev = (previous ?? []).filter(Boolean).slice(-2);
+  if (prev.length === 0) return false;
+  const ASK_WORDS = ['叫', '夸', '抱', '亲', '摸', '陪', '哄', '夸我', '给我'];
+  const asks = /[？?]|叫|夸|给我|要你|你倒是|就一次|好不好/.test(text);
+  if (!asks) return false;
+  return prev.some((item) => {
+    if (similarity(text, item) >= 0.3) return true;
+    // 字面不同、但还在要同一件事（都在「叫 / 夸 / 抱」这一挂）
+    return ASK_WORDS.some((word) => text.includes(word) && String(item).includes(word) && /[？?叫夸]/.test(item));
+  });
 }

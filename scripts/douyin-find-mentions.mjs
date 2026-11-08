@@ -20,7 +20,7 @@ const arg = (name, fallback = '') => {
 };
 const has = (name) => argv.includes(`--${name}`);
 
-const HER_UIDS = new Set(['1026306400586516']); // 吃白饭的机器人账号
+const HER_UIDS = new Set(['1000000000000000']); // 吃白饭的机器人账号
 const HER_NAMES = ['吃白饭的机器人账号', '机器人账号'];
 
 function videoIdOf(input) {

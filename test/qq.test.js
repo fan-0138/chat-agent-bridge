@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createBridge } from '../src/bridge.js';
 import { createMemory } from '../src/memory.js';
 import { KeyedQueue } from '../src/queue.js';
 import { buildPrompt } from '../src/prompt.js';
 import { loadQqConfig } from '../src/config-qq.js';
-import { createRateLimiter, extractText, normalizeEvent, startOneBot } from '../src/transport-onebot.js';
+import { createRateLimiter, extractText, findMedia, normalizeEvent, startOneBot } from '../src/transport-onebot.js';
 
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
 const SELF = '10000';
@@ -110,7 +111,38 @@ test('图片消息归一化成 media，并带下载地址', () => {
     { selfId: SELF },
   );
   assert.equal(msg.type, 'media');
-  assert.equal(msg.image.url, 'https://example.com/a.png');
+  assert.equal(msg.kind, 'image');
+  assert.equal(msg.media.url, 'https://example.com/a.png');
+});
+
+test('视频消息也归一化成 media（kind=video）', () => {
+  const msg = normalizeEvent(
+    privateEvent({ message: [{ type: 'video', data: { url: 'https://example.com/v.mp4', file: 'v.mp4' } }] }),
+    { selfId: SELF },
+  );
+  assert.equal(msg.type, 'media');
+  assert.equal(msg.kind, 'video');
+  assert.equal(msg.media.url, 'https://example.com/v.mp4');
+});
+
+test('视频 + 文字一起发：文字留着，附件是视频', () => {
+  const msg = normalizeEvent(
+    privateEvent({ message: [text('这像不像你'), { type: 'video', data: { url: 'https://example.com/v.mp4' } }] }),
+    { selfId: SELF },
+  );
+  assert.equal(msg.type, 'media');
+  assert.equal(msg.kind, 'video');
+  assert.equal(msg.text, '这像不像你');
+});
+
+test('findMedia：图片优先于视频，都没有返回 null', () => {
+  const both = findMedia([
+    { type: 'video', data: { url: 'https://example.com/v.mp4' } },
+    { type: 'image', data: { url: 'https://example.com/a.png' } },
+  ]);
+  assert.equal(both.kind, 'image');
+  assert.equal(findMedia([text('只有字')]), null);
+  assert.equal(findMedia([{ type: 'video', data: {} }]), null);
 });
 
 test('extractText：数组和 CQ 字符串都能处理', () => {
@@ -299,6 +331,7 @@ function transportConfig(overrides = {}) {
     sendFailBreaker: 2,
     maxReconnect: 1,
     maxMediaBytes: 1024 * 1024,
+    maxVideoBytes: 4 * 1024 * 1024,
     dataDir: '/tmp/qq-test',
     auditFile: '/tmp/qq-test/audit.jsonl',
     ...overrides,
@@ -345,6 +378,53 @@ test('集成：连上 NapCat，群里 @我 -> 发送 send_group_msg 到对应群
   } finally {
     await transport.stop();
     await new Promise((resolve) => fake.wss.close(resolve));
+  }
+});
+
+test('集成：私聊视频会下载到 inbox，并标成 kind=video', async () => {
+  const fake = await startFakeNapCat();
+  // 起一个本地 http 服务充当 QQ 的多媒体下载地址，返回一个假 mp4
+  const media = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x18]),
+    Buffer.from('ftypmp42'),
+    Buffer.alloc(4096, 1),
+  ]);
+  const server = createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'video/mp4' });
+    res.end(media);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const mediaUrl = `http://127.0.0.1:${server.address().port}/v.mp4`;
+
+  const dir = await mkdtemp(join(tmpdir(), 'qq-video-'));
+  const received = [];
+  const transport = await startOneBot({
+    config: transportConfig({ wsUrl: fake.url, dataDir: dir, auditFile: join(dir, 'audit.jsonl') }),
+    log: silentLog,
+    onMessage: async (msg) => {
+      received.push(msg);
+    },
+  });
+
+  try {
+    assert.ok(await waitFor(() => transport.stats().connected), '应该连上');
+    fake.emit(
+      privateEvent({
+        message_id: 77,
+        message: [text('这像不像你'), { type: 'video', data: { url: mediaUrl, file: 'v.mp4' } }],
+      }),
+    );
+    assert.ok(await waitFor(() => received.length > 0), '应该收到视频消息');
+    const msg = received[0];
+    assert.equal(msg.kind, 'video');
+    assert.equal(msg.text, '这像不像你');
+    assert.match(msg.path, /\.mp4$/);
+    const files = await readdir(join(dir, 'inbox'));
+    assert.equal(files.length, 1);
+  } finally {
+    await transport.stop();
+    await new Promise((resolve) => fake.wss.close(resolve));
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 

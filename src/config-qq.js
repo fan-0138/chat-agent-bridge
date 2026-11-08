@@ -10,6 +10,7 @@
  *  - 连续 5 次发送失败即熔断。
  */
 
+import { homedir } from 'node:os';
 import { DEFAULTS as BASE, readBool, readInt, readList } from './config.js';
 
 const DEFAULTS = {
@@ -93,6 +94,7 @@ const DEFAULTS = {
   ttsRefAudio: '',
   ttsPromptText: '',
   ttsSpeed: 1,
+  ttsSplitMethod: 'cut2',   // cut5 会把短句拆碎，实测念错字概率高得多
   ttsTemperature: 1.4,   // 1.0 太平，1.4 起伏更活但还不吞字
   ttsTopK: 15,
   voiceOutName: 'zh-CN-XiaoyiNeural',
@@ -111,6 +113,11 @@ const DEFAULTS = {
   farewellMinUptimeMin: 30,
   edgeTtsBin: '.venv-tts/bin/edge-tts',
   ffmpegBin: 'ffmpeg',
+  ffprobeBin: 'ffprobe',
+  // 视频识别：抽帧 + 音轨转写（whisper.cpp 的 CLI + 模型）
+  videoMaxFrames: 3,
+  whisperBin: 'whisper-cli',
+  whisperModel: `${homedir()}/Documents/deepseek/tts/whisper-models/ggml-small.bin`,
   // 说话方式笔记 + emoji 上限（模型自己数不住，出站时机械兜底）
   voiceFile: 'data/voice.md',
   slangFile: 'data/slang.md',
@@ -130,6 +137,10 @@ const DEFAULTS = {
   // 互动通知（谁 @ 了她 / 评论了她）：只读，便宜，默认开
   douyinNoticeEnabled: true,
   douyinNoticeMin: 10,
+  // 自己作品下面的评论：通知接口慢两小时，这里直连作品评论列表
+  douyinOwnCommentsEnabled: true,
+  douyinOwnCommentsMin: 15,
+  douyinOwnCommentsMaxWorks: 3,
   // 就算没看到未读红点，也至少这么久走一次完整检查（防角标不刷新）
   douyinForceCheckMin: 5,
   douyinFeedScript: 'scripts/douyin-feed.mjs',
@@ -265,6 +276,7 @@ export function loadQqConfig(env = process.env) {
     ttsRefAudio: env.QQ_TTS_REF?.trim() || DEFAULTS.ttsRefAudio,
     ttsPromptText: env.QQ_TTS_PROMPT_TEXT?.trim() || DEFAULTS.ttsPromptText,
     ttsSpeed: Number(env.QQ_TTS_SPEED?.trim() || DEFAULTS.ttsSpeed) || 1,
+    ttsSplitMethod: env.QQ_TTS_SPLIT?.trim() || DEFAULTS.ttsSplitMethod,
     ttsTemperature: Number(env.QQ_TTS_TEMPERATURE?.trim() || DEFAULTS.ttsTemperature) || DEFAULTS.ttsTemperature,
     ttsTopK: Number(env.QQ_TTS_TOP_K?.trim() || DEFAULTS.ttsTopK) || DEFAULTS.ttsTopK,
     voiceOutName: env.QQ_VOICE_NAME?.trim() || DEFAULTS.voiceOutName,
@@ -281,6 +293,10 @@ export function loadQqConfig(env = process.env) {
     farewellMinUptimeMin: readInt(env, 'QQ_FAREWELL_MIN_UPTIME_MIN', DEFAULTS.farewellMinUptimeMin),
     edgeTtsBin: env.QQ_EDGE_TTS_BIN?.trim() || DEFAULTS.edgeTtsBin,
     ffmpegBin: env.QQ_FFMPEG_BIN?.trim() || DEFAULTS.ffmpegBin,
+    ffprobeBin: env.QQ_FFPROBE_BIN?.trim() || DEFAULTS.ffprobeBin,
+    videoMaxFrames: readInt(env, 'QQ_VIDEO_MAX_FRAMES', DEFAULTS.videoMaxFrames),
+    whisperBin: env.QQ_WHISPER_BIN?.trim() || DEFAULTS.whisperBin,
+    whisperModel: env.QQ_WHISPER_MODEL?.trim() || DEFAULTS.whisperModel,
     voiceFile: env.QQ_VOICE_FILE?.trim() || DEFAULTS.voiceFile,
     slangFile: env.QQ_SLANG_FILE?.trim() || DEFAULTS.slangFile,
     emojiMax: readInt(env, 'QQ_EMOJI_MAX', DEFAULTS.emojiMax),
@@ -298,6 +314,9 @@ export function loadQqConfig(env = process.env) {
     douyinCdpUrl: env.QQ_DOUYIN_CDP_URL?.trim() || DEFAULTS.douyinCdpUrl,
     douyinNoticeEnabled: readBool(env, 'QQ_DOUYIN_NOTICE', DEFAULTS.douyinNoticeEnabled),
     douyinNoticeMin: readInt(env, 'QQ_DOUYIN_NOTICE_MIN', DEFAULTS.douyinNoticeMin),
+    douyinOwnCommentsEnabled: readBool(env, 'QQ_DOUYIN_OWN_COMMENTS', DEFAULTS.douyinOwnCommentsEnabled),
+    douyinOwnCommentsMin: readInt(env, 'QQ_DOUYIN_OWN_COMMENTS_MIN', DEFAULTS.douyinOwnCommentsMin),
+    douyinOwnCommentsMaxWorks: readInt(env, 'QQ_DOUYIN_OWN_COMMENTS_WORKS', DEFAULTS.douyinOwnCommentsMaxWorks),
     douyinForceCheckMin: readInt(env, 'QQ_DOUYIN_FORCE_CHECK_MIN', DEFAULTS.douyinForceCheckMin),
     // 多久强制开一次私信面板（秒）。角标读不到时，这就是最坏延迟。
     douyinRecheckSec: readInt(env, 'QQ_DOUYIN_RECHECK_SEC', 25),
@@ -318,6 +337,7 @@ export function loadQqConfig(env = process.env) {
     visionCli: env.VISION_CLI?.trim() || null,
     visionTimeoutMs: readInt(env, 'VISION_TIMEOUT_MS', BASE.visionTimeoutMs),
     maxMediaBytes: readInt(env, 'MAX_MEDIA_BYTES', BASE.maxMediaBytes),
+    maxVideoBytes: readInt(env, 'MAX_VIDEO_BYTES', BASE.maxVideoBytes),
     problems,
   });
 }

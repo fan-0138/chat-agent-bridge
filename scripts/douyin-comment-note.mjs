@@ -36,6 +36,7 @@ const replyCid = option('--reply-cid', '');
 const rootCid = option('--root-cid', '');
 const nid = option('--nid', '');
 const replyNickname = option('--reply-nickname', '');
+const mention = option('--mention', '');
 const dry = argv.includes('--dry-run');
 const recordFile = resolve(root, 'data/mind/comments.jsonl');
 
@@ -62,12 +63,15 @@ try {
   const page = remote ? await context.newPage() : (context.pages()[0] ?? (await context.newPage()));
   await stealth(page);
   // replyCid/rootCid：回复某条评论（at-inbox 里带的 commentId / rootCommentId）；不传就还是普通发评论
-  const result = await postComment(page, url, text, { dryRun: dry, replyCid, rootCid });
+  // 楼中楼回复（reply_id）实测发出去不落地：接口回 ok + cid，但评论区没有。
+  // 所以默认走顶层评论 + @对方（这条路 11-04 验证过能看见）。
+  const result = await postComment(page, url, text, { dryRun: dry, mention, replyCid, rootCid });
   await note({
     at: started,
     url,
     text,
     why: recordWhy,
+    mention: result.mention?.nickname ?? (mention || null),
     replyCid: result.replyCid ?? (replyCid || null),
     rootCid: rootCid || null,
     nid: nid || null,

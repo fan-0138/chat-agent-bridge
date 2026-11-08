@@ -16,7 +16,8 @@
 import { readFile, writeFile, mkdir, stat, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
-import { loadMeals, previousMonth, summarizeMonth } from './meals.js';
+import { loadCravings, loadMeals, previousMonth, summarizeMonth } from './meals.js';
+import { summarizeTaste, tastePromptLine } from './meal-stats.js';
 
 /* ────────────────────────── 纯函数：状态描述 ────────────────────────── */
 
@@ -106,7 +107,23 @@ export function parseMealNote(text) {
   return { text: stripped, meal };
 }
 
-/** 当前活动：优先用记录里的，过期了退回到时段默认值。 */
+/** 她说「想吃 X」：单独拎出来记进想吃账本。 */
+export function parseCraveNote(text) {
+  const source = String(text ?? '');
+  const match = source.match(/[【\[]\s*想吃\s*[:：]\s*([^】\]\n]{1,40}?)\s*[】\]]/);
+  if (!match) return { text: source.trim(), crave: '' };
+  const crave = match[1].replace(/\s+/g, ' ').trim();
+  const stripped = source.replace(match[0], '').replace(/\n{3,}/g, '\n\n').trim();
+  return { text: stripped, crave };
+}
+
+/**
+ * 当前活动：优先用记录里的，过期了退回到时段默认值。
+ *
+ * 2026-11-08 爸爸说「状态里『在手机上跟你聊天』可以细分一下，不一定就是在聊天」：
+ * 「正在回消息」这类只是**临时压上去的一层**（`activityOverlay`），
+ * 过期后要退回她本来在干的事（刷抖音/发呆/睡觉），不能一直挂着「跟你聊天」。
+ */
 export function currentActivity(state, now = Date.now()) {
   const hour = new Date(now).getHours();
   const fallback = defaultActivity(hour);
@@ -114,8 +131,17 @@ export function currentActivity(state, now = Date.now()) {
 
   const ageMin = Math.round((now - (state.activitySince ?? now)) / 60_000);
   const ttlMin = state.activityTtlMin ?? fallback.ttlMin;
-  if (ageMin >= ttlMin) return { ...fallback, ageMin: 0, fromRecord: false };
-  return { label: state.activity, ttlMin, ageMin, fromRecord: true };
+  const live = ageMin < ttlMin;
+  if (live) return { label: state.activity, ttlMin, ageMin, fromRecord: true };
+
+  // 临时状态过期：回到被压住的那件事（如果它自己也还没过期）
+  const base = state.activityBase;
+  if (state.activityOverlay && base?.label) {
+    const baseAgeMin = Math.round((now - Number(base.since ?? 0)) / 60_000);
+    const baseTtlMin = Number(base.ttl ?? fallback.ttlMin);
+    if (baseAgeMin < baseTtlMin) return { label: base.label, ttlMin: baseTtlMin, ageMin: baseAgeMin, fromRecord: true };
+  }
+  return { ...fallback, ageMin: 0, fromRecord: false };
 }
 
 /** 生成注入 prompt 的「你此刻」段落。 */
@@ -296,6 +322,24 @@ export function createLife({ config, log, root = process.cwd(), isBusy, takeSear
     state.activity = label;
     state.activitySince = now();
     state.activityTtlMin = ttlMin;
+    // 真的换了件事做：临时那层（在回消息）作废
+    state.activityOverlay = false;
+    state.activityBase = null;
+  }
+
+  /** 临时压一层（比如「在手机上回你消息」）：把她本来在干的事记下来，过期自己退回去。 */
+  function startOverlay(label, ttlMin) {
+    if (!state.activityOverlay && state.activity) {
+      state.activityBase = {
+        label: state.activity,
+        since: state.activitySince,
+        ttl: state.activityTtlMin,
+      };
+    }
+    state.activity = label;
+    state.activitySince = now();
+    state.activityTtlMin = ttlMin;
+    state.activityOverlay = true;
   }
 
   /**
@@ -518,6 +562,18 @@ export function createLife({ config, log, root = process.cwd(), isBusy, takeSear
             `上个月（${prev}）${last.count} 顿。` +
             '（他问「记了几顿 / 喂饭记录」就以这里为准，别说错月份、也别编。）',
         );
+        // 这阵子的口味：吃得最多的、嘴里常念叨的。她记得住这个才像有人过的日子
+        try {
+          const cravings = await loadCravings(resolve(root, 'data/life/cravings.jsonl'));
+          const taste = tastePromptLine(summarizeTaste({ meals: rows, cravings, now: now(), days: 30 }));
+          if (taste) {
+            parts.push(
+              `${taste}\n（这是你最近的口味。他问「你喜欢吃什么」就照这个说，别编没吃过的。）`,
+            );
+          }
+        } catch {
+          /* 统计坏了就当没有 */
+        }
         // 今天具体吃了什么：饭账里有自动记的、也有她自己说的。
         // 不给她看，她就会否认自己吃过的饭（空间/房间显示的和她嘴上说的对不上）。
         const today = localDay(now());
@@ -576,6 +632,20 @@ export function createLife({ config, log, root = process.cwd(), isBusy, takeSear
       if (!clean) return null;
       const ttl = Math.min(240, Math.max(5, Number(ttlMin) || 90));
       setActivity(clean, ttl);
+      await save();
+      return currentActivity(state, now());
+    },
+
+    /**
+     * 临时状态：比如「在手机上回你消息」——只是这一刻在做的事，压在她本来在干的事上面，
+     * TTL 一到自动退回（刷抖音/发呆/睡觉）。真换了件事做（noteActivity/browse）会直接把它作废。
+     */
+    async overlayActivity(label, ttlMin = 6) {
+      await load();
+      const clean = String(label ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (!clean) return null;
+      const ttl = Math.min(60, Math.max(2, Number(ttlMin) || 6));
+      startOverlay(clean, ttl);
       await save();
       return currentActivity(state, now());
     },

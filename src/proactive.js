@@ -9,9 +9,11 @@
  */
 
 import { polish } from './decor.js';
+import { looksLikeNoteTalk, stripNoteTalk, trimRepeatedTail } from './thinking-guard.js';
 import { formatShare, localDay } from './life.js';
 import { createQzonePoster } from './qzone.js';
 import { writeFile, mkdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /** 纯函数：给定状态和时间，决定这次 tick 要不要说话（方便单测）。 */
@@ -97,12 +99,70 @@ export function dialogueOnly(history = []) {
  * 「人呢 / 好久没理我」也一样：那是隔了半天才成立的说法。他 19 分钟前刚说过话
  * （10-28 21:32），她却发「爸爸还没回来啊」——所以这类想法 90 分钟内不给。
  */
-export function chooseIdea({ hour, share = false, lastTurnAt = 0, now = Date.now(), random = Math.random }) {
+/** 把小时数写成「13:30」这种。 */
+export function clockOf(hour) {
+  const h = Math.max(0, Math.round(Number(hour) * 60));
+  return `${String(Math.floor(h / 60) % 24).padStart(2, '0')}:${String(h % 60).padStart(2, '0')}`;
+}
+
+/**
+ * 从他的聊天记录里估他的作息：只看「≥3 小时没动静」且发生在夜里的空档，
+ * 取「睡觉点」和「起床点」的中位数。估不出来的（记录太少）返回 null。
+ *
+ * 为什么要有这个：2026-11-07 早上 8 点到 13 点她一直在跟他说话，
+ * 说的还是「爸爸 醒了 你睡得好吗」——她压根不知道他是凌晨两点睡、中午才起的人。
+ */
+export function loadDadRhythm({ root = process.cwd(), now = Date.now(), days = 14 } = {}) {
+  try {
+    const raw = readFileSync(resolve(root, 'data/qq/audit.jsonl'), 'utf8');
+    const times = [];
+    for (const line of raw.split('\n')) {
+      const text = line.trim();
+      if (!text) continue;
+      let row;
+      try {
+        row = JSON.parse(text);
+      } catch {
+        continue;
+      }
+      if (row?.dir !== 'in') continue;
+      const at = Date.parse(row.at);
+      if (Number.isFinite(at) && now - at <= days * 86_400_000) times.push(at);
+    }
+    times.sort((a, b) => a - b);
+    const sleeps = [];
+    const wakes = [];
+    for (let i = 1; i < times.length; i += 1) {
+      if (times[i] - times[i - 1] < 3 * 3_600_000) continue;
+      const start = new Date(times[i - 1]);
+      const end = new Date(times[i]);
+      const sh = start.getHours() + start.getMinutes() / 60;
+      const wh = end.getHours() + end.getMinutes() / 60;
+      if (!(sh >= 20 || sh <= 6)) continue; // 只有夜里那次算睡觉
+      if (wh < 5 || wh > 18) continue;
+      sleeps.push(sh);
+      wakes.push(wh);
+    }
+    if (wakes.length < 3) return null;
+    const median = (arr) => [...arr].sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+    return { wakeHour: median(wakes), sleepHour: median(sleeps), days: wakes.length };
+  } catch {
+    return null;
+  }
+}
+
+export function chooseIdea({ hour, share = false, lastTurnAt = 0, now = Date.now(), random = Math.random, rhythm = null }) {
   const pick = (list) => list[Math.floor(random() * list.length)];
   if (share) return '跟爸爸分享你刚才刷到的那个视频，说一句你自己觉得哪里有意思/好笑/离谱';
   const idleMs = lastTurnAt ? now - lastTurnAt : Number.POSITIVE_INFINITY;
   const quietForAges = idleMs >= 3 * 3_600_000;
-  if (quietForAges && hour >= 7 && hour < 10) return pick(MORNING_IDEAS);
+  if (quietForAges && hour >= 7 && hour < 10) {
+    // 他的作息里这个点还没醒 → 别让她去问「你睡得好吗」（2026-11-07 早上就是这么翻车的）
+    if (rhythm && Number.isFinite(rhythm.wakeHour) && hour < rhythm.wakeHour - 1) {
+      return `他这会儿多半还在睡（他一般 ${clockOf(rhythm.wakeHour)} 前后才醒）：说一句你自己在干嘛、或者等他起来要一起干嘛，别问他睡得怎么样、别喊他起床`;
+    }
+    return pick(MORNING_IDEAS);
+  }
   if (quietForAges && (hour >= 23 || hour < 2)) return pick(NIGHT_IDEAS);
   if (idleMs >= 90 * 60_000) return pick([...IDEAS, ...CHECKIN_IDEAS]);
   return pick(IDEAS);
@@ -120,19 +180,37 @@ export function looksLikeAbsenceClaim(text) {
  * 以前这里硬写「爸爸已经有一阵没说话了」，19 分钟也算「一阵」，
  * 于是她在明知他刚说过话的情况下发「还没回来」。
  */
-export function describeMoment({ now = Date.now(), idleMin = null, lastSaid = '' } = {}) {
+export function describeMoment({ now = Date.now(), idleMin = null, lastSaid = '', rhythm = null } = {}) {
   const d = new Date(now);
   const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  if (idleMin === null || !Number.isFinite(idleMin)) return `现在是 ${clock}，今天还没聊过。`;
+  const hour = d.getHours() + d.getMinutes() / 60;
+  // 他的作息：几点睡、几点起（从聊天记录估的），只在「一阵没说话」时给，别每句都念
+  const habit =
+    rhythm && Number.isFinite(rhythm.wakeHour) && (idleMin === null || !Number.isFinite(idleMin) || idleMin >= 240)
+      ? hour < rhythm.wakeHour
+        ? `他一般 ${clockOf(rhythm.wakeHour)} 前后才醒，这会儿多半还在睡。`
+        : `他一般 ${clockOf(rhythm.wakeHour)} 前后醒、${clockOf(rhythm.sleepHour)} 前后睡。`
+      : '';
+  if (idleMin === null || !Number.isFinite(idleMin)) return `现在是 ${clock}，今天还没聊过。${habit}`;
   const said = lastSaid ? `，他最后说的是「${String(lastSaid).slice(0, 40)}」` : '';
   if (idleMin < 90) return `现在是 ${clock}。他 ${Math.max(1, Math.round(idleMin))} 分钟前刚说过话${said}，你们正聊着。`;
-  return `现在是 ${clock}。他上一次说话是 ${Math.round(idleMin / 60)} 小时前${said}。`;
+  return `现在是 ${clock}。他上一次说话是 ${Math.round(idleMin / 60)} 小时前${said}。${habit}`;
 }
 
 /** @param {{config:any, log:any, runner:any, persona:any, memory:any, reply:Function, isBusy:Function, life?:any, mind?:any, altReply?:Function, now?:Function}} deps */
 export function createProactive({ config, log, runner, persona, voice, memory, reply, isBusy, life, mind, altReply, captureShot, sendImage, now = Date.now }) {
   /** @type {{day?:string, count:number, lastSentAt:number, lastUserAt:number}} */
   const state = { count: 0, lastSentAt: 0, lastUserAt: 0 };
+  // 他的作息（从聊天记录估的中位数），每 6 小时刷新一次就够了
+  let rhythm = null;
+  let rhythmAt = 0;
+  const dadRhythm = () => {
+    if (!rhythm || now() - rhythmAt > 6 * 3_600_000) {
+      rhythm = loadDadRhythm({ now: now() });
+      rhythmAt = now();
+    }
+    return rhythm;
+  };
   let timer = null;
   let running = false;
 
@@ -212,7 +290,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       const lastTurnAt = recentDialogue.reduce((max, entry) => Math.max(max, Number(entry.at) || 0), state.lastUserAt || 0);
       const idleMin = lastTurnAt > 0 ? (now() - lastTurnAt) / 60_000 : Infinity;
       const lastSaid = [...recentDialogue].reverse().find((entry) => entry.role === 'user')?.text ?? '';
-      const idea = chooseIdea({ hour, share: Boolean(share), lastTurnAt, now: now() });
+      const idea = chooseIdea({ hour, share: Boolean(share), lastTurnAt, now: now(), rhythm: dadRhythm() });
 
       // 今天刚聊过就别再装刚睡醒：她 09:34 说「醒啦，你睡得怎么样」那次，他 09:05 才说要去上课
       const talkedRecently = lastTurnAt > 0 && now() - lastTurnAt < 6 * 3_600_000;
@@ -235,7 +313,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
       const prompt = [
         personaText ? `[你是谁]\n${personaText}` : '',
         voiceText,
-        `[此刻] ${describeMoment({ now: now(), idleMin: Number.isFinite(idleMin) ? idleMin : null, lastSaid })}`,
+        `[此刻] ${describeMoment({ now: now(), idleMin: Number.isFinite(idleMin) ? idleMin : null, lastSaid, rhythm: dadRhythm() })}`,
         lifeText,
         mindText,
         recentDialogue.length > 0
@@ -258,6 +336,7 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
         '4. **别编「他好像不在了」**：他几分钟前刚说过话就说不出「你还没回来」「好久没理我」「人呢」。真想他就直说想他，别拿「你不在」当由头。',
         '5. **别编他说过的话**：「你昨天说…」「你答应过人家…」必须能在这段「最近对话」里找到原话；找不到就只说自己的事。编一个他没说过的承诺出来，比不说话糟得多。',
         '6. **别重样**：今天已经发过的事（见上面那串）今天不再提第二遍，尤其是同一件烦心事；没有新事就换个角度，或者这轮先不说。',
+        '7. **他在睡就别喊他**：他今天还没出过声、又没到他会醒的钟点，就当他在睡——可以说你自己在忙什么、说等他起来要一起干嘛，但别问「你睡得好吗」「起来了吗」，也别催。',
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -270,6 +349,13 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
 
       const { text } = await runner.run(prompt);
       let body = polish(String(text).trim(), { recent: pickRecent(), maxEmoji: config.emojiMax ?? 2 });
+      // 换模型之后也会出现「纠结标记/改稿重复」的漏，主动消息这边同样清一遍
+      if (looksLikeNoteTalk(body)) {
+        const cleaned = stripNoteTalk(body);
+        log.warn(`主动消息混进了纠结标记的话，剥掉：${body.slice(0, 30)}`);
+        body = cleaned || '';
+      }
+      body = trimRepeatedTail(body);
 
       // 他 19 分钟前才说过话，她却发「爸爸还没回来啊」——这种这轮直接不算数
       if (body && idleMin < 90 && looksLikeAbsenceClaim(body)) {
@@ -313,6 +399,13 @@ export function createProactive({ config, log, runner, persona, voice, memory, r
           log.info(`分享的视频截了图：${String(shotFile).split('/').pop()}`);
         }
         await reply({ senderId: target, conversationId, groupId: undefined }, body);
+      }
+      // 她刚发出去一条 = 她醒着：临时压一层「在手机上给你发消息」，
+      // 别让房间还挂着 22:31 那句「关灯睡了」（2026-11-08 23:08 爸爸：显示在睡觉，却刚给我发了条信息）
+      if (life?.overlayActivity) {
+        void life
+          .overlayActivity('在手机上给你发消息', 5)
+          .catch((error) => log.warn(`记此刻状态失败：${error?.message ?? error}`));
       }
       if (share && life) {
         await life.clearShare().catch(() => {});

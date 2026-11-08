@@ -26,12 +26,15 @@ import { createVoice } from './voice.js';
 import { createSlang } from './slang.js';
 import { audit, formatAudit, repliesFromMemory } from './voice-audit.js';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createVision, resolveVisionCli } from './vision.js';
+import { createVideoProbe } from './video.js';
 import { startOneBot } from './transport-onebot.js';
 import { createProactive } from './proactive.js';
 import { createLife } from './life.js';
 import { createMind } from './mind.js';
 import { createAgenda } from './agenda.js';
+import { createLessons } from './lessons.js';
 import { createRobotInbox } from './robot-inbox.js';
 import { createMemoryStore } from './memory-store.js';
 import { createUsage } from './usage.js';
@@ -43,6 +46,7 @@ import {
   appendMeal,
   formatMonthReport,
   loadMeals,
+  appendCraving,
   markRunning,
   markStopped,
   maybeAutoMeal,
@@ -172,6 +176,25 @@ async function main() {
   if (vision.available) log.info(`看图能力已启用（${config.visionCli ?? 'modlens'}）`);
   else log.warn(`看图能力不可用：${vision.reason}`);
 
+  // 视频：抽静帧交给上面那套看图，音轨丢给 whisper；两个都没有就老实说看不了
+  const videoProbe = createVideoProbe({
+    ffmpegBin: config.ffmpegBin,
+    ffprobeBin: config.ffprobeBin,
+    whisperBin: config.whisperBin,
+    whisperModel: config.whisperModel,
+    vision,
+    workDir: resolve(process.cwd(), 'data/qq/video'),
+    maxFrames: config.videoMaxFrames,
+    log,
+  });
+  if (videoProbe.available) {
+    log.info(
+      `视频识别：启用（抽 ${config.videoMaxFrames} 帧${existsSync(config.whisperModel) ? ' + 音轨转写' : '，无 whisper 模型只抽帧'}）`,
+    );
+  } else {
+    log.warn(`视频识别不可用：${videoProbe.reason}`);
+  }
+
   printSafety(config, log);
 
   /** @type {ReturnType<typeof createBridge> | undefined} */
@@ -184,6 +207,8 @@ async function main() {
   let robotInbox;
   /** @type {ReturnType<typeof createAgenda> | undefined} */
   let agenda;
+  /** @type {ReturnType<typeof createLessons> | undefined} */
+  let lessons;
   /** @type {ReturnType<typeof createMind> | undefined} */
   let mind;
   /** @type {ReturnType<typeof createDouyinChannel> | undefined} */
@@ -243,6 +268,8 @@ async function main() {
   // 只读她自己的时间（想事、记下的事，以及「想去搜什么」）；真正「想」在 scripts/mind-run.mjs
   // 那个常驻进程里。先建她、再建生活状态：刷抖音时要能从她这儿拿「这次想搜什么」。
   agenda = createAgenda({ root: process.cwd(), log });
+  // 她自己复盘出来的教训（mind-run 每晚写，这里只读，聊天时带着）
+  lessons = createLessons({ root: process.cwd() });
   robotInbox = createRobotInbox({ root: process.cwd(), log });
   mind = createMind({ config, persona, root: process.cwd(), log, agenda });
 
@@ -273,10 +300,12 @@ async function main() {
     voice,
     slang,
     vision,
+    videoProbe,
     life,
     mind,
     recollection,
     agenda,
+    lessons,
     robotInbox,
     // 她给机器人留了技术问题：给他发一句提醒（10 分钟内只提醒一次，别刷屏）
     notifyRobotTask: (note) => notifyRobotTask(note),
@@ -292,6 +321,8 @@ async function main() {
     meals: {
       append: (dish) =>
         appendMeal({ file: resolve(process.cwd(), 'data/life/meals.jsonl'), dish, source: 'self' }),
+      crave: (dish) =>
+        appendCraving({ file: resolve(process.cwd(), 'data/life/cravings.jsonl'), dish, source: 'self' }),
     },
     health,
     sticker,
@@ -330,6 +361,8 @@ async function main() {
     slang,
     // 和 QQ 共用同一个记忆实例 → 两边是同一份对话时间线（同一 key，同一份 JSONL）
     memory,
+    // 回私信时把房间里的「此刻」临时改成「在手机上回网友私信」
+    life,
     log,
     onInbound: () => proactive?.touchUser?.(),
   });

@@ -11,6 +11,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createApiKeysSource } from './credentials.js';
 
 const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
 const ANSI = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
@@ -72,7 +73,7 @@ export function tidyOutput(text) {
  * }} options
  */
 export function createDshRunner(options) {
-  const { command, profile, cwd, timeoutMs, apiKey, log, usage } = options;
+  const { command, profile, cwd, timeoutMs, apiKey, apiKeys, log, usage } = options;
 
   /** 记一笔用量：成功/失败/超时都算；统计出问题绝不能影响聊天。 */
   async function noteUsage(record) {
@@ -121,9 +122,20 @@ export function createDshRunner(options) {
       log.debug(`spawn ${command} --profile ${profile} <${prompt.length} chars>`);
 
       const env = cleanEnv(process.env);
-      // apiKey 可能是函数：每次 spawn 现取，主人换完 key 不用重启桥接
+      // key 每次 spawn 现取，主人换完 key 不用重启桥接。
+      // 2026-11-07 起不止一把：两条线路认的 key 不同（MaaS→DEEPSEEK_API_KEY，
+      // niucodes→NIUCODES_API_KEY），两把都塞进去，谁用谁取。
       const resolvedApiKey = typeof apiKey === 'function' ? await apiKey() : apiKey;
+      // 没显式给 apiKeys 的调用方（比如调试脚本）也自动带上 credentials.yaml 里所有 key：
+      // provider 换成 niucodes 之后，光有 DEEPSEEK_API_KEY 不够用了
+      const keysSource = apiKeys ?? createApiKeysSource();
       if (resolvedApiKey) env.DEEPSEEK_API_KEY ??= resolvedApiKey;
+      if (typeof keysSource === 'function') {
+        const extra = (await keysSource()) ?? {};
+        for (const [name, value] of Object.entries(extra)) {
+          if (value && !env[name]) env[name] = value;
+        }
+      }
       // cleanEnv 会把 DSH_* 全过滤掉，所以沙箱档位得在这里显式塞回去。
       // danger-full-access 同时让审批策略变 never（headless 没人能点同意，ask 就等于拒绝）。
       if (options.permissionMode) env.DSH_PERMISSION_MODE = options.permissionMode;

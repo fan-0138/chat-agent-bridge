@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   decide,
   chooseIdea,
+  loadDadRhythm,
   dialogueOnly,
   describeMoment,
   looksLikeAbsenceClaim,
@@ -367,4 +368,69 @@ test('不再给「就单纯说一声在」这种叫号式想法', () => {
   for (const idea of seen) {
     assert.doesNotMatch(idea, /说一声「在」/, `「在。」像被叫号，已删：${idea}`);
   }
+});
+
+/* ── 他的作息：早上别当她以为他醒了 ── */
+test('她的作息知识：太早的时候不会问「你睡得好吗」', () => {
+  const rhythm = { wakeHour: 12, sleepHour: 1.75, days: 14 };
+  const idea = chooseIdea({ hour: 8, lastTurnAt: Date.now() - 7 * 3_600_000, now: Date.now(), random: () => 0, rhythm });
+  assert.match(idea, /还在睡/);
+  assert.match(idea, /别喊他起床/);
+  assert.doesNotMatch(idea, /冒头找他/); // 不再是「刚醒就冒头找他」那条
+});
+
+test('他的作息：过了他的起床点就照常打招呼', () => {
+  const rhythm = { wakeHour: 12, sleepHour: 1.75, days: 14 };
+  const idea = chooseIdea({ hour: 13, lastTurnAt: Date.now() - 8 * 3_600_000, now: Date.now(), random: () => 0, rhythm });
+  assert.doesNotMatch(idea, /还在睡/);
+});
+
+test('「此刻」会把他的作息念给她听：没到起床点说他在睡', () => {
+  const at = new Date(2026, 10, 7, 8, 11, 0).getTime();
+  const line = describeMoment({ now: at, idleMin: 400, lastSaid: '晚安', rhythm: { wakeHour: 12, sleepHour: 1.75, days: 5 } });
+  assert.match(line, /12:00/);
+  assert.match(line, /还在睡/);
+  const later = describeMoment({ now: new Date(2026, 10, 7, 15, 0, 0).getTime(), idleMin: 120, lastSaid: '', rhythm: { wakeHour: 12, sleepHour: 1.75, days: 5 } });
+  assert.doesNotMatch(later, /还在睡/);
+});
+
+test('估不出来的时候不硬编作息（记录太少就是 null）', () => {
+  assert.equal(loadDadRhythm({ root: '/tmp/没有这个目录' }), null);
+});
+
+/* ───────── 她发了消息，房间就不能还写「睡着」（2026-11-08 爸爸报的） ───────── */
+
+test('主动发出去之后，把「在手机上给你发消息」压到生活状态上', async () => {
+  const overlays = [];
+  const proactive = createProactive({
+    config: {
+      proactiveEnabled: true,
+      proactiveMaxPerDay: 3,
+      proactiveMinGapMin: 90,
+      proactiveAfterIdleMin: 45,
+      proactiveQuietStart: 0,
+      proactiveQuietEnd: 0,
+      proactiveChance: 1,
+      proactiveCommentChance: 0,
+      proactiveQzoneChance: 0,
+      proactiveDouyinChance: 0,
+      allowList: ['123456789'],
+      emojiMax: 2,
+    },
+    log: { info() {}, warn() {}, debug() {} },
+    runner: { async run() { return { text: '刷到个视频，想起你了。', durationMs: 5 }; } },
+    persona: async () => '',
+    voice: null,
+    memory: { async load() { return []; }, async append() {} },
+    reply: async () => {},
+    isBusy: () => false,
+    life: {
+      async peekShare() { return null; },
+      async promptSection() { return ''; },
+      async clearShare() {},
+      async overlayActivity(label, ttl) { overlays.push({ label, ttl }); },
+    },
+  });
+  await proactive._tick();
+  assert.deepEqual(overlays, [{ label: '在手机上给你发消息', ttl: 5 }]);
 });

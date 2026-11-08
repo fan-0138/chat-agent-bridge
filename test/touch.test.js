@@ -160,15 +160,18 @@ test('她自己的反应：prompt 里有视频、有那半句、有字数要求'
   assert.match(asleep, /半梦半醒/);
 });
 
-test('进 prompt：摸完紧接着开口才提醒她提一句', () => {
+test('进 prompt：摸完半小时内开口才提醒她可以顺口带一句', () => {
   const now = at('2026-11-03T12:00:00Z');
   const fresh = { lastAt: now - 2 * 60_000, lastLine: '嗯…' };
-  assert.match(formatTouchSection(fresh, { now, nudge: true }), /顺口提一句/);
-  assert.doesNotMatch(formatTouchSection(fresh, { now }), /顺口提一句/);
-  // 20 分钟前摸的：还算「刚才」，但不推她去翻旧账
-  const old = { lastAt: now - 20 * 60_000, lastLine: '嗯…' };
+  assert.match(formatTouchSection(fresh, { now, nudge: true }), /顺口带一句/);
+  assert.doesNotMatch(formatTouchSection(fresh, { now }), /顺口带一句/);
+  // 20 分钟前摸的：还在窗口里，可以带一句
+  const twenty = { lastAt: now - 20 * 60_000, lastLine: '嗯…' };
+  assert.match(formatTouchSection(twenty, { now, nudge: true }), /顺口带一句/);
+  // 40 分钟前：还算「刚才」，但不再推她提
+  const old = { lastAt: now - 40 * 60_000, lastLine: '嗯…' };
   assert.match(formatTouchSection(old, { now, nudge: true }), /摸了摸你的头/);
-  assert.doesNotMatch(formatTouchSection(old, { now, nudge: true }), /顺口提一句/);
+  assert.doesNotMatch(formatTouchSection(old, { now, nudge: true }), /顺口带一句/);
 });
 
 test('进 prompt：她已经自己补了一句，就带上那句', () => {

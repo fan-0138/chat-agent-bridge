@@ -6,10 +6,14 @@
  */
 
 import { createDshRunner } from './dsh.js';
+import { createApiKeysSource } from './credentials.js';
 import { createOpenAiRunner } from './openai-runner.js';
 
-export function createAgentRunners({ config, log, dshCommand, apiKey, usage }) {
+export function createAgentRunners({ config, log, dshCommand, apiKey, apiKeys, usage }) {
   const backend = String(config.agentBackend ?? 'dsh').toLowerCase();
+  // 默认把 credentials.yaml 里能找到的 key 全带上（DEEPSEEK + NIUCODES），
+  // 换 API 只改配置，不用一个个调用点去补参数
+  const keysSource = apiKeys ?? createApiKeysSource();
 
   if (backend === 'openai') {
     const runner = createOpenAiRunner({
@@ -26,6 +30,7 @@ export function createAgentRunners({ config, log, dshCommand, apiKey, usage }) {
   const runner = createDshRunner({
     command: dshCommand,
     apiKey,
+    apiKeys: keysSource,
     profile: config.agentProfile,
     cwd: config.agentCwd,
     timeoutMs: config.agentTimeoutMs,
@@ -37,6 +42,7 @@ export function createAgentRunners({ config, log, dshCommand, apiKey, usage }) {
   const chatRunner = createDshRunner({
     command: dshCommand,
     apiKey,
+    apiKeys: keysSource,
     profile: config.agentProfile,
     cwd: config.agentCwd,
     timeoutMs: config.agentChatTimeoutMs ?? config.agentTimeoutMs,

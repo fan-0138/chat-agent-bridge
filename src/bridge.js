@@ -5,9 +5,9 @@
 
 import { DshError } from './dsh.js';
 import { isTaskMessage } from './classify.js';
-import { polish } from './decor.js';
+import { polish, looksLikeLooping } from './decor.js';
 import { buildPrompt, notesFrom } from './prompt.js';
-import { parseActivityNote, parseMealNote } from './life.js';
+import { parseActivityNote, parseCraveNote, parseMealNote } from './life.js';
 import { splitBubbles, splitReply } from './split.js';
 import { parseVoiceSegments, VOICE_MARKER } from './voice-out.js';
 
@@ -24,7 +24,15 @@ export function wantsVoiceMessage(text) {
     /出声(给|让|跟)/.test(raw)
   );
 }
-import { looksLikeThinking, stripThinking, looksLikeSelfTalk, stripSelfTalk } from './thinking-guard.js';
+import {
+  looksLikeThinking,
+  stripThinking,
+  looksLikeSelfTalk,
+  stripSelfTalk,
+  looksLikeNoteTalk,
+  stripNoteTalk,
+  trimRepeatedTail,
+} from './thinking-guard.js';
 import { looksUnfinished, isLowContent, pickNudge } from './reader.js';
 
 
@@ -49,7 +57,10 @@ import { looksUnfinished, isLowContent, pickNudge } from './reader.js';
  */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function createBridge({ config, runner, chatRunner, memory, queue, log, reply, typing, persona, voice, slang, vision, onActivity, life, mind, recollection, meals, health, sticker, sendSticker, voiceOut, sendVoice, agenda, nudgeMind, robotInbox, notifyRobotTask }) {
+/** 历史/记忆里怎么称呼附件，别把 kind 原样写进上下文 */
+const MEDIA_LABELS = { image: '图片', video: '视频', voice: '语音', file: '文件' };
+
+export function createBridge({ config, runner, chatRunner, memory, queue, log, reply, typing, persona, voice, slang, vision, videoProbe, onActivity, life, mind, recollection, meals, health, sticker, sendSticker, voiceOut, sendVoice, agenda, lessons, nudgeMind, robotInbox, notifyRobotTask }) {
   /**
    * 上一轮是不是卡超时了。
    * 她看不到系统这一层：10-29 19:45 那轮 DSH 超时，系统自动发了句「这个卡住了」，
@@ -217,9 +228,11 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
   }
 
   async function processMessage(msg, key, text) {
-    // 正在聊天就先把她的「此刻」改成聊天中：不然房间那边还挂着她十分钟前的状态
-    if (!msg.groupId && life?.noteActivity) {
-      void life.noteActivity('在手机上跟你聊天', 20).catch((error) => log.debug?.(`记此刻状态失败：${error?.message ?? error}`));
+    // 正在回消息就临时压一层「在手机上回你消息」，别写成「跟你聊天」——
+    // 2026-11-08 爸爸说的：她拿着手机不一定是在聊天，也可能在刷抖音/发呆。
+    // 这是临时层（overlay）：TTL 一到自动退回她本来在干的事；真换了件事做也会立刻作废。
+    if (!msg.groupId && life?.overlayActivity) {
+      void life.overlayActivity('在手机上回你消息', 5).catch((error) => log.debug?.(`记此刻状态失败：${error?.message ?? error}`));
     }
     const stats = queue.stats();
     const queuedAhead = stats.waiting > 0 || stats.active > 0;
@@ -302,14 +315,27 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
 
     let attachment;
     if (msg.type === 'media') {
-      const canSee = Boolean(vision?.available) && (msg.kind === 'image' || msg.kind === 'video');
-      const evidence = canSee ? await vision.analyze(msg.path) : null;
-      attachment = {
-        kind: msg.kind,
-        path: msg.path,
-        evidence,
-        reason: canSee ? null : (vision?.reason ?? '该类型暂不支持视觉识别'),
-      };
+      const kind = msg.kind || 'image';
+      if (kind === 'video') {
+        // 视频：抽静帧 + 音轨转写（她看不到连续画面，但够接话了）
+        const probe = videoProbe?.available ? await videoProbe.probe(msg.path).catch(() => null) : null;
+        attachment = {
+          kind,
+          path: msg.path,
+          evidence: probe?.evidence ?? null,
+          frames: probe?.frames ?? [],
+          reason: probe ? null : (videoProbe?.reason ?? '视频识别不可用'),
+        };
+      } else {
+        const canSee = Boolean(vision?.available) && kind === 'image';
+        const evidence = canSee ? await vision.analyze(msg.path) : null;
+        attachment = {
+          kind,
+          path: msg.path,
+          evidence,
+          reason: canSee ? null : (vision?.reason ?? '该类型暂不支持视觉识别'),
+        };
+      }
     }
 
     const lifeText = life ? await life.promptSection().catch(() => '') : '';
@@ -319,6 +345,8 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     const memoryText = recollection && text ? await recollection.promptSection(text).catch(() => '') : '';
     // 她手上还没做完的事
     const agendaText = agenda?.promptSection ? await agenda.promptSection().catch(() => '') : '';
+    // 她自己复盘出来的教训（不是规矩，是她自己写的「下次怎么想」）
+    const lessonsText = lessons?.promptSection ? await lessons.promptSection().catch(() => '') : '';
 
     // 他隔了多久才收到回复：不写清楚，她就会自己编（「才二十分钟不到」其实三十多分钟）
     const lastUserAt = [...dialogue].reverse().find((entry) => entry.role === 'user')?.at ?? 0;
@@ -348,6 +376,26 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
           '他要是问你回得慢，就直说刚才卡了一下。',
       );
     }
+    // 他经常只回一两个词（「晚上」「随便」「都行」）：那是接话，不是打招呼
+    const compactText = String(text ?? '').replace(/\s+/g, '');
+    if (compactText.length > 0 && compactText.length <= 4 && !msg.groupId) {
+      extraLines.push(
+        `[短消息] 他这条只有「${compactText}」，大概率是在接你上一句（比如回答时间、地点、要不要），` +
+          '不是打招呼、也不是新话题。如果这个词是时间（早上/中午/下午/晚上/明天），他说的是那个时间点，不代表现在是；' +
+          '现在是几点以你的「此刻」为准。先看你上一句问了什么，再顺着接；实在接不上就问一句最短的。',
+      );
+    }
+    // 他刚拒绝了 / 收线了：这一轮别再磨同一件事
+    // 2026-11-07 实录：她连着三次要他「叫一声鲸鲸」，他先说不让学、又说气死了，她还在绕。
+    const REFUSAL = /(?:^|[，。！？\s])(?:不|别|不用|不要|算了|免了|改天|不想|气死|烦死)/;
+    const said = String(text ?? '').trim();
+    if (said && REFUSAL.test(said)) {
+      // 只给她事实，不给她禁令：让她自己判断该怎么接
+      extraLines.push(
+        `[事实] 他刚说的原话是「${said.slice(0, 40)}」——这句话里带着否掉/收线/不耐烦的意味。` +
+          '怎么接由你判断，别急着回，先想一秒：他现在想听什么。',
+      );
+    }
     if (mindText) extraLines.push(mindText);
     if (memoryText) extraLines.push(memoryText);
 
@@ -357,7 +405,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       slang: slangText,
       history: dialogue,
       notes,
-      extra: [agendaText, extraLines.join('\n\n')].filter(Boolean).join('\n\n'),
+      extra: [agendaText, lessonsText, extraLines.join('\n\n')].filter(Boolean).join('\n\n'),
       text,
       senderName: msg.senderName || '用户',
       roomName: msg.roomName,
@@ -407,6 +455,47 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
         fallback: '没听清，再说一遍。',
       });
 
+      // 第三道：把「要不要写标记」的纠结、以及改稿留下的重复尾巴清掉（2026-11-07 换模型后出现）
+      answer = await repairLeak({
+        prompt,
+        active,
+        answer,
+        userText: text,
+        isLeak: (candidate) => looksLikeNoteTalk(candidate),
+        strip: stripNoteTalk,
+        label: '纠结标记',
+        retryNote:
+          '你上一条把自己的写作过程发出来了（「实际没吃，别写」「删掉」「改成不加标记」「没换状态」这类）。' +
+          '那些取舍你自己想就好，不要写进正文。现在只输出要发给他的一两句原话。',
+        fallback: '刚才脑子绕住了，你再说一遍。',
+      });
+      answer = trimRepeatedTail(answer);
+
+      // 她要是又绕回同一件事：不拦她，让她自己回头看一眼再决定说什么
+      // （2026-11-07：连着三次要他「叫一声鲸鲸」那次，缺的不是规则，是她没回头看）
+      const prevAssistant = history
+        .filter((entry) => entry.role === 'assistant')
+        .map((entry) => entry.text)
+        .slice(-2);
+      if (looksLikeLooping(answer, prevAssistant)) {
+        try {
+          const reflect = await active.run(
+            `${prompt}\n\n[回头看一眼]\n` +
+              `你刚写出来的是：「${answer.slice(0, 120)}」。\n` +
+              `你上一条说的是：「${String(prevAssistant.at(-1) ?? '').slice(0, 120)}」。\n` +
+              '先自己回答一句：这一条是在接他刚说的那句话，还是又一次绕回你自己想要的那件事？\n' +
+              '想清楚之后，只输出要发给他的那一两句：该改就改，觉得没问题就原样返回。',
+          );
+          const next = String(reflect.text ?? '').trim();
+          if (next && next !== answer) {
+            log.info(`她又绕回同一件事，自己回头看了一眼：${next.slice(0, 30)}`);
+            answer = next;
+          }
+        } catch (error) {
+          log.warn(`回头看一眼失败：${error?.message ?? error}`);
+        }
+      }
+
       // 机械去重：重复的起头、雷同的句尾 emoji、叠出来的标点
       const recent = history
         .filter((entry) => entry.role === 'assistant')
@@ -416,14 +505,19 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
       // 她自己写了「此刻我在干嘛」就顺手改生活状态（那行不会发出去，只落进房间和下一轮）
       const noted = parseActivityNote(polished);
       const ate = parseMealNote(noted.text || polished);
-      const output = ate.text || polished;
+      const craved = parseCraveNote(ate.text || polished);
+      const output = craved.text || polished;
       if (noted.activity && life?.noteActivity) {
         void life.noteActivity(noted.activity, 90).catch((error) => log.debug?.(`记此刻状态失败：${error?.message ?? error}`));
       }
       if (ate.meal && meals?.append) {
         void meals.append(ate.meal).catch((error) => log.debug?.(`记饭账失败：${error?.message ?? error}`));
       }
-      const userTurn = msg.type === 'media' ? `[${msg.kind === 'image' ? '图片' : msg.kind}]${text ? ` ${text}` : ''}` : text;
+      // 她说想吃啥：单独记一本，比「吃了什么」更能说明喜好
+      if (craved.crave && meals?.crave) {
+        void meals.crave(craved.crave).catch((error) => log.debug?.(`记想吃失败：${error?.message ?? error}`));
+      }
+      const userTurn = msg.type === 'media' ? `[${MEDIA_LABELS[msg.kind] ?? msg.kind}]${text ? ` ${text}` : ''}` : text;
       failedTurns.delete(key);
       await memory.append(key, 'user', userTurn, { name: msg.senderName });
       await memory.append(key, 'assistant', output);
@@ -436,7 +530,7 @@ export function createBridge({ config, runner, chatRunner, memory, queue, log, r
     } catch (error) {
       await ack.cancel();
       // 历史里保留用户这句话，但不写入失败回复，避免污染上下文。
-      await memory.append(key, 'user', msg.type === 'media' ? `[${msg.kind}]` : text);
+      await memory.append(key, 'user', msg.type === 'media' ? `[${MEDIA_LABELS[msg.kind] ?? msg.kind}]` : text);
       throw error;
     }
   }

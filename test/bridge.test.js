@@ -26,7 +26,7 @@ function makeConfig(overrides = {}) {
   };
 }
 
-async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, sticker, sendSticker, mind, life, recollection, meals, agenda, robotInbox, notifyRobotTask } = {}) {
+async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, sticker, sendSticker, mind, life, recollection, meals, agenda, lessons, robotInbox, notifyRobotTask } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'bridge-'));
   const memory = createMemory({ dir, maxTurns: 6, maxChars: 2000, log: silentLog });
   const sent = [];
@@ -52,6 +52,7 @@ async function setup({ config = makeConfig(), runner, vision, voice, voiceOut, s
     recollection,
     meals,
     agenda,
+    lessons,
     robotInbox,
     notifyRobotTask,
     sendVoice: async (_target, buffer, meta) => voices.push({ size: buffer.length, ...meta }),
@@ -107,6 +108,25 @@ test('超长输入会被截断，不会原样塞进 prompt', async () => {
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /消息过长，已截断到 50 字/);
   assert.ok(prompts[0].length < 600);
+});
+
+test('她自己复盘出的教训会进 prompt（是提示，不是规矩）', async () => {
+  const lessons = {
+    promptSection: async () =>
+      '[你自己复盘出来的（不是爸爸教的，是你自己想的）]\n- 11/7 我说「你忙完了？」；以后他说忙就松开手让他去',
+  };
+  const { bridge, prompts } = await setup({ lessons });
+  await bridge.handle({ ...baseMsg });
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /你自己复盘出来的/);
+  assert.match(prompts[0], /松开手让他去/);
+});
+
+test('没有教训本时 prompt 照常，不报错', async () => {
+  const { bridge, prompts } = await setup();
+  await bridge.handle({ ...baseMsg });
+  assert.equal(prompts.length, 1);
+  assert.doesNotMatch(prompts[0], /你自己复盘出来的/);
 });
 
 test('图片消息：下载路径与视觉证据会进入 prompt', async () => {
@@ -676,7 +696,9 @@ test('问句不会被晾着', async () => {
     config: makeConfig({ replyMergeWindowMs: 30, replySkipChance: 1, replySkipMaxPerDay: 5, replySkipMinGapMin: 0 }),
   });
   await bridge.handle({ ...baseMsg, id: 'm-e1', text: '在吗' });
-  await sleepMs(150);
+  // 600ms 不是「等得久」，是因为 `node --test` 并行跑整包时机器吃满，
+  // 当初写 150ms 会偶发假红（2026-11-08 实测：单跑 3 次全过、整包并行跑挂过两次）
+  await sleepMs(600);
   assert.equal(prompts.length, 1);
   assert.equal(sent.length, 1);
 });
@@ -705,16 +727,21 @@ test('她写了【此刻：…】：那行不发出去，只改生活状态', as
   assert.doesNotMatch(sent[0], /此刻/);
 });
 
-test('没有标记就照常回，生活状态只标成聊天中', async () => {
-  const noted = [];
-  const life = { promptSection: async () => '现在 20:00。你正在：在工位发呆。', noteActivity: async (label) => noted.push(label) };
+test('没有标记就照常回，生活状态只临时标一下「在手机上回你消息」', async () => {
+  const overlaid = [];
+  const life = {
+    promptSection: async () => '现在 20:00。你正在：在工位发呆。',
+    noteActivity: async () => {},
+    overlayActivity: async (label, ttl) => overlaid.push({ label, ttl }),
+  };
   const { bridge, sent } = await setup({
     life,
     runner: { async run() { return { text: '在呢，怎么了？', durationMs: 5 }; } },
   });
   await bridge.handle({ ...baseMsg });
   await new Promise((r) => setTimeout(r, 30));
-  assert.deepEqual(noted, ['在手机上跟你聊天']);
+  // 2026-11-08：她拿着手机不一定在聊天，所以只压一层很短的临时状态，不是长期「跟你聊天」
+  assert.deepEqual(overlaid, [{ label: '在手机上回你消息', ttl: 5 }]);
   assert.deepEqual(sent, ['在呢，怎么了？']);
 });
 
@@ -823,16 +850,19 @@ test('【记住：…】不发给爸爸，写进记忆', async () => {
   assert.match(notes[0].text, /爸爸喜欢我撒娇/);
 });
 
-test('聊天的时候她的「此刻」变成在聊天，房间不会还挂着旧状态', async () => {
-  const noted = [];
+test('聊天只临时标「在手机上回你消息」，别长期挂着聊天状态', async () => {
+  const overlaid = [];
   const life = {
     async promptSection() { return ''; },
-    async noteActivity(label, ttl) { noted.push({ label, ttl }); return { label }; },
+    async noteActivity() {},
+    async overlayActivity(label, ttl) { overlaid.push({ label, ttl }); return { label }; },
   };
   const { bridge } = await setup({ life, runner: { async run() { return { text: '在呢', durationMs: 5 }; } } });
   await bridge.handle({ ...baseMsg, id: 'life-chat-1', text: '在干嘛' });
   await new Promise((r) => setTimeout(r, 50));
-  assert.ok(noted.some((row) => /聊天/.test(row.label) && row.ttl >= 10));
+  assert.ok(overlaid.some((row) => /回你消息/.test(row.label)));
+  const minTtl = Math.min(...overlaid.map((row) => row.ttl));
+  assert.ok(minTtl >= 2 && minTtl <= 10, '临时状态挂几分钟就够，别挂成长期');
 });
 
 /* ── 她顺手记待办 / 划掉（2026-11-04） ───────────────── */
@@ -873,4 +903,19 @@ test('【找机器人：…】不发给爸爸，写进技术收件箱并提醒�
   assert.match(rows[0].text, /ffmpeg/);
   assert.equal(notices.length, 1);
   assert.match(notices[0], /ffmpeg/);
+});
+
+test('他只回一个词（晚上）：提示词里点明这是在接话，不是打招呼', async () => {
+  const prompts = [];
+  const { bridge } = await setup({
+    runner: {
+      async run(prompt) {
+        prompts.push(prompt);
+        return { text: '好，晚上给你端出来', durationMs: 5 };
+      },
+    },
+  });
+  await bridge.handle({ ...baseMsg, id: 'short-1', text: '晚上' });
+  assert.match(prompts[0], /\[短消息\]/);
+  assert.match(prompts[0], /不是打招呼/);
 });

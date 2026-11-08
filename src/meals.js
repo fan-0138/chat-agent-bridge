@@ -80,6 +80,28 @@ export async function appendMeal({ file, dish, by = null, source = 'self', at = 
 }
 
 /**
+ * 记一笔「想吃」：她嘴上念叨的、没真吃到的，单独一本账（cravings.jsonl）。
+ * 吃了什么和想吃什么不是一回事，混在一起就分不出喜好。
+ */
+export async function appendCraving({ file, dish, at = new Date(), source = 'self', by = null }) {
+  const entry = {
+    at: at.toISOString(),
+    day: dayKey(at),
+    dish: String(dish).trim().slice(0, 40),
+    by: by || null,
+    source,
+  };
+  await mkdir(dirname(file), { recursive: true });
+  await appendFile(file, `${JSON.stringify(entry)}\n`, 'utf8');
+  return entry;
+}
+
+/** 读想吃账本（坏行跳过）。 */
+export async function loadCravings(file) {
+  return loadMeals(file);
+}
+
+/**
  * 到点自动记一顿：同一顿饭只自动记一次（重启也不会重复）。
  * @returns {Promise<object|null>} 记下的那条；不该记就 null
  */

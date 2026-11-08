@@ -135,6 +135,9 @@ export function createVoiceOut({
   const ttsRefAudio = config.ttsRefAudio || '';
   const ttsPromptText = config.ttsPromptText || '';
   const ttsSpeed = Number(config.ttsSpeed ?? 1) || 1;
+  // 切句策略：cut5 会把一句拆成多段喂给模型，实测容易把「爸爸」念成「拜拜」；
+  // cut2 在 597 个测试之外单独 A/B 过：同一批 6 句，cut2 全对，cut5 错 3 句
+  const ttsSplit = config.ttsSplitMethod || 'cut2';
   // 采样温度：1.0 太稳（听着平），1.5 往上容易吞字；1.4 是实测下来起伏和准确度都还行的点
   const ttsTemperature = Number(config.ttsTemperature ?? 1.4) || 1.4;
   const ttsTopK = Number(config.ttsTopK ?? 15) || 15;
@@ -250,7 +253,7 @@ export function createVoiceOut({
           ref_audio_path: refPath,
           prompt_text: ttsPromptText,
           prompt_lang: 'zh',
-          text_split_method: 'cut5',
+          text_split_method: ttsSplit,
           media_type: 'wav',
           speed_factor: ttsSpeed,
           temperature: ttsTemperature,

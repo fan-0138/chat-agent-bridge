@@ -23,6 +23,7 @@ import { buildPrompt, notesFrom } from './prompt.js';
 import { splitBubbles } from './split.js';
 import { likeVideo } from '../scripts/lib/douyin-browser.mjs';
 import { postComment } from '../scripts/lib/douyin-comments.js';
+import { OWN_SEEN_FILE, pickNewComments } from './own-comments.js';
 import { hideBrowserWindow, openBrowser, closeBrowser as closeRemoteBrowser, STEALTH_UA, HOST_CDP_URL } from '../scripts/lib/douyin-browser.mjs';
 import { extractDouyinVideo, readVideoSummary, formatVideoSummary } from '../scripts/lib/douyin-video.js';
 import { readNotices, pickReplyable } from '../scripts/lib/douyin-notice.js';
@@ -53,7 +54,7 @@ export function conversationMemoryKey(name, config) {
   return `douyin_${label || 'someone'}`;
 }
 
-export function createDouyinChannel({ config, runner, persona, voice, slang, memory, log, onInbound }) {
+export function createDouyinChannel({ config, runner, persona, voice, slang, memory, life, log, onInbound }) {
   const profileDir = resolve(process.cwd(), 'data/douyin-profile');
   const seenFile = resolve(process.cwd(), 'data/douyin/dm-seen.json');
   const sentFile = resolve(process.cwd(), 'data/douyin/dm-sent.json');
@@ -72,6 +73,7 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
   let stopped = false;
   let lastPanelWarnAt = 0;
   let lastNoticeAt = 0;
+  let lastOwnCommentsAt = 0;
   let lastFullCheckAt = 0;
   let lastHeartbeatAt = 0;
   /** 最近一次真的有人发私信/我们回了私信；闲置超过 10 分钟就把轮询放慢 */
@@ -739,6 +741,8 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
       const body = polish(String(answer).trim(), { recent, maxEmoji: config.emojiMax ?? 2 });
       if (!body) return;
       await sendMessage(body);
+      // 在手机上回的是网友的私信，不是跟爸爸聊天（2026-11-08 状态细分）
+      void life?.overlayActivity?.('在手机上回网友私信', 6).catch(() => {});
       // 只有真的发出去了才记 seen —— 之前是先记后发，发失败的那条就永远不再试了
       seen.add(key);
       await saveSeen();
@@ -996,6 +1000,82 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
     }
   }
 
+  /**
+   * 扫她自己作品下面的新评论，写进收件箱。
+   * 通知接口会慢两小时，这条是直连：自己作品列表 → 每条作品的评论列表。
+   * 只写不回复，回不回是她自己的事。
+   */
+  async function pollOwnComments() {
+    if (config.douyinOwnCommentsEnabled === false) return;
+    const interval = Math.max(5, config.douyinOwnCommentsMin ?? 15) * 60_000;
+    const now = Date.now();
+    if (now - lastOwnCommentsAt < interval) return;
+    lastOwnCommentsAt = now;
+
+    const seenFile = resolve(process.cwd(), OWN_SEEN_FILE);
+    const inboxFile = resolve(process.cwd(), 'data/douyin/at-inbox.jsonl');
+    let seen = [];
+    try {
+      const raw = JSON.parse(await readFile(seenFile, 'utf8'));
+      if (Array.isArray(raw)) seen = raw.map(String);
+    } catch {
+      /* 第一次跑 */
+    }
+
+    const data = await page
+      .evaluate(async ({ maxWorks, perWork }) => {
+        const call = async (url) => {
+          const res = await fetch(url, { credentials: 'include' });
+          if (!res.ok) return null;
+          return res.json().catch(() => null);
+        };
+        const base = 'device_platform=webapp&aid=6383&channel=channel_pc_web';
+        const self = await call(`https://www.douyin.com/aweme/v1/web/user/profile/self/?${base}`);
+        const user = self?.user ?? null;
+        if (!user?.sec_uid) return { error: 'no-self' };
+        const qs = new URLSearchParams({
+          sec_user_id: user.sec_uid,
+          count: String(maxWorks),
+          max_cursor: '0',
+        });
+        const posts = await call(`https://www.douyin.com/aweme/v1/web/aweme/post/?${qs}&${base}`);
+        const works = (posts?.aweme_list ?? []).slice(0, maxWorks).filter((a) => Number(a?.statistics?.comment_count ?? 0) > 0);
+        const out = [];
+        for (const work of works) {
+          const cqs = new URLSearchParams({ aweme_id: String(work.aweme_id), count: String(perWork), cursor: '0' });
+          const res = await call(`https://www.douyin.com/aweme/v1/web/comment/list/?${cqs}&${base}`);
+          out.push({ awemeId: String(work.aweme_id), desc: work.desc ?? '', comments: res?.comments ?? [] });
+        }
+        return { selfUid: String(user.uid ?? ''), works: out };
+      }, { maxWorks: config.douyinOwnCommentsMaxWorks ?? 3, perWork: 20 })
+      .catch(() => null);
+
+    if (!data || data.error) {
+      if (config.douyinChatDebug && data?.error) log.debug(`自己作品评论：拉不到（${data.error}）`);
+      return;
+    }
+    if (!data.works?.length) return;
+
+    const { rows, seenNext } = pickNewComments({ works: data.works, seen, selfUid: data.selfUid, nowMs: now });
+    if (rows.length === 0) return;
+
+    try {
+      await mkdir(join(inboxFile, '..'), { recursive: true });
+      await appendFile(inboxFile, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`, 'utf8');
+    } catch (error) {
+      log.warn(`自己作品评论：写收件箱失败（${error?.message ?? error}）`);
+      return;
+    }
+    try {
+      await writeFile(seenFile, JSON.stringify(seenNext), 'utf8');
+    } catch {
+      /* 忽略 */
+    }
+    for (const row of rows) {
+      log.info(`自己作品有新评论：${row.nickname || '有人'}「${row.content.slice(0, 30)}」`);
+    }
+  }
+
   /** 出站队列：别的进程/脚本想让她在抖音里说一句话，就写进这个文件。 */
   async function flushOutbox() {
     noteDmActivity();
@@ -1234,6 +1314,8 @@ export function createDouyinChannel({ config, runner, persona, voice, slang, mem
 
       // 便宜的活先干：通知是页面里一次 fetch，10 分钟一次
       await pollNotices();
+      // 自己作品下面的新评论：同样只读，15 分钟一次
+      await pollOwnComments();
 
       // 心跳：10 分钟一条，顺便再确认一次窗口是藏着的（新窗口偶尔会把进程顶出来）
       if (Date.now() - lastHeartbeatAt > 10 * 60_000) {
